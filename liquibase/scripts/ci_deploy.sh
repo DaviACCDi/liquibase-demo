@@ -22,13 +22,14 @@ run_liquibase () {
   local PROPS="$1"; local URL="$2"; local WHAT="$3"
   echo "+ liquibase $WHAT (props=$PROPS url=$URL)"
   docker run --rm --network host \
-    -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
     liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --url="$URL" \
+    --changelog-parameters.deployer="$DEPLOYER" \
     $WHAT
 }
+
 
 promote () {
   local ENV_NAME="$1"; local PROPS="$2"; local URL="$3"
