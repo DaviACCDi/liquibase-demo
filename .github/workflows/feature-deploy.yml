@@ -82,7 +82,7 @@ jobs:
       - name: Encontrar PR aberto para main
         if: inputs.auto_merge == 'true'
         id: findpr
-        uses: peter-evans/find-pull-request@v3
+        uses: actions/find-pull-request@v3
         with:
           base: main
           branch: ${{ github.ref_name }}
@@ -90,7 +90,7 @@ jobs:
       # se deploy OK, mergeia PR (respeita branch protection)
       - name: Auto-merge PR
         if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && success() && inputs.mode == 'apply'
-        uses: peter-evans/merge@v3
+        uses: actions/merge@v3
         with:
           pull-request: ${{ steps.findpr.outputs.pull-request-number }}
           merge-method: squash
@@ -100,7 +100,7 @@ jobs:
       # se falhou, comenta no PR dizendo que foi feito rollback
       - name: Comentar PR (falha + rollback)
         if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && failure() && inputs.mode == 'apply'
-        uses: peter-evans/create-or-update-comment@v4
+        uses: actions/create-or-update-comment@v4
         with:
           issue-number: ${{ steps.findpr.outputs.pull-request-number }}
           body: |
