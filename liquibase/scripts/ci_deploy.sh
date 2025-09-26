@@ -21,7 +21,7 @@ fi
 
 # ===================== Helpers =====================
 mask_url() {
-  # esconde user:pass e host/db, e password= da query
+  # esconde user:pass e host/db, e password= na query
   sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/([?&]password=)[^&]+/\1****/g' <<<"$1"
 }
 
@@ -31,12 +31,22 @@ JDBC_URL_NOAUTH=""
 
 parse_pg_url() {
   local RURL="$1"
-  # aceita postgres:// ou postgresql://
-  local REST="${RURL#postgres*://}"      # user:pass@host:port/db?query
-  local CREDS="${REST%%@*}"              # user:pass
-  local HOSTPORT_DBQ="${REST#*@}"        # host:port/db?query
-  local HOSTPORT="${HOSTPORT_DBQ%%/*}"   # host:port
-  local DBQ="${HOSTPORT_DBQ#*/}"         # db?query
+
+  # aceita postgres:// ou postgresql:// (sem regex)
+  if [[ "$RURL" == postgres://* ]]; then
+    :
+  elif [[ "$RURL" == postgresql://* ]]; then
+    :
+  else
+    echo "::error::URL não começa com postgres:// ou postgresql://"; return 1
+  fi
+
+  # remove o prefixo até "://"
+  local REST="${RURL#*://}"               # user:pass@host:port/db?query
+  local CREDS="${REST%%@*}"               # user:pass
+  local HOSTPORT_DBQ="${REST#*@}"         # host:port/db?query
+  local HOSTPORT="${HOSTPORT_DBQ%%/*}"    # host:port
+  local DBQ="${HOSTPORT_DBQ#*/}"          # db?query
 
   DB_USER="${CREDS%%:*}"
   DB_PASS="${CREDS#*:}"
@@ -50,11 +60,14 @@ parse_pg_url() {
     DB_QUERY="${DBQ#*?}"
   fi
 
-  # garante sslmode=require na query (sem duplicar)
+  # garante sslmode=require na query (sem duplicar) — sem regex
   if [[ -z "$DB_QUERY" ]]; then
     DB_QUERY="sslmode=require"
-  elif [[ ! "$DB_QUERY" =~ (^|&)sslmode= ]]; then
-    DB_QUERY="${DB_QUERY}&sslmode=require"
+  else
+    case "$DB_QUERY" in
+      *sslmode=*) : ;;  # já tem
+      *) DB_QUERY="${DB_QUERY}&sslmode=require" ;;
+    esac
   fi
 
   JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
@@ -62,13 +75,17 @@ parse_pg_url() {
 
 to_jdbc_and_creds() {
   local RURL="$1"
-  if [[ "$RURL" =~ ^postgres(ql)?:// ]]; then
+  if [[ "$RURL" == postgres://* || "$RURL" == postgresql://* ]]; then
     parse_pg_url "$RURL"
-  elif [[ "$RURL" =~ ^jdbc:postgresql:// ]]; then
+  elif [[ "$RURL" == jdbc:postgresql://* ]]; then
     JDBC_URL_NOAUTH="$RURL"
-    # tenta extrair user/pass da query se houver (não obrigatório)
-    if [[ "$RURL" =~ [\?&]user=([^&]+) ]]; then DB_USER="${BASH_REMATCH[1]}"; fi
-    if [[ "$RURL" =~ [\?&]password=([^&]+) ]]; then DB_PASS="${BASH_REMATCH[1]}"; fi
+    # tenta extrair user/pass da query se houver (opcional)
+    case "$RURL" in
+      *"?user="*|*"&user="* ) DB_USER="$(sed -n 's/.*[?&]user=\([^&]*\).*/\1/p' <<<"$RURL")" ;; *) : ;;
+    esac
+    case "$RURL" in
+      *"?password="*|*"&password="* ) DB_PASS="$(sed -n 's/.*[?&]password=\([^&]*\).*/\1/p' <<<"$RURL")" ;; *) : ;;
+    esac
   else
     echo "::error::Formato de URL não reconhecido: $(mask_url "$RURL")" >&2
     return 1
@@ -105,7 +122,6 @@ run_liquibase () {
 promote () {
   local ENV_NAME="$1"; local PROPS="$2"; local URL="$3"
 
-  # Sanity
   [[ -f "$WORKDIR/$LB_DIR/conf/$PROPS" ]] || { echo "::error::Arquivo de propriedades ausente: $LB_DIR/conf/$PROPS"; exit 2; }
 
   echo "===== [$ENV_NAME] VALIDATE ====="
