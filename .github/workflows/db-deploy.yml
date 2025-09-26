@@ -24,26 +24,22 @@ jobs:
           --health-cmd "pg_isready -U demo"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Mostrar contexto e arquivos
+      - name: Verificar arquivos
         run: |
-          echo "Actor: ${{ github.actor }}"
-          echo "SHA: ${{ github.sha }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "LB_DIR: $LB_DIR"
-          find "$LB_DIR" -maxdepth 2 -type f -print
+          pwd
+          ls -la
+          ls -la liquibase/scripts || true
+          ls -la liquibase/conf || true
+          ls -la liquibase/changelogs || true
 
-      - name: Docker pull liquibase (para logar versão)
-        run: |
-          docker pull liquibase/liquibase:latest
-          docker run --rm liquibase/liquibase --version || true
+      - name: Garantir permissão ao script
+        run: chmod +x liquibase/scripts/ci_deploy.sh
 
       - name: DEV - deploy (script)
         id: dev_run
-        run: |
-          bash liquibase/scripts/ci_deploy.sh DEV
+        run: bash liquibase/scripts/ci_deploy.sh DEV
 
       - name: Publicar plano DEV (artefato)
         if: always()
@@ -72,26 +68,14 @@ jobs:
           --health-cmd "pg_isready -U demo"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Mostrar contexto e arquivos
-        run: |
-          echo "Actor: ${{ github.actor }}"
-          echo "SHA: ${{ github.sha }}"
-          echo "From needs: ${{ needs.dev-deploy.result }}"
-          echo "LB_DIR: $LB_DIR"
-          find "$LB_DIR" -maxdepth 2 -type f -print
-
-      - name: Docker pull liquibase (para logar versão)
-        run: |
-          docker pull liquibase/liquibase:latest
-          docker run --rm liquibase/liquibase --version || true
+      - name: Garantir permissão ao script
+        run: chmod +x liquibase/scripts/ci_deploy.sh
 
       - name: TEST - deploy (script)
         id: test_run
-        run: |
-          bash liquibase/scripts/ci_deploy.sh TEST
+        run: bash liquibase/scripts/ci_deploy.sh TEST
 
       - name: Publicar plano TEST (artefato)
         if: always()
@@ -120,26 +104,14 @@ jobs:
           --health-cmd "pg_isready -U demo"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Mostrar contexto e arquivos
-        run: |
-          echo "Actor: ${{ github.actor }}"
-          echo "SHA: ${{ github.sha }}"
-          echo "From needs: ${{ needs.test-deploy.result }}"
-          echo "LB_DIR: $LB_DIR"
-          find "$LB_DIR" -maxdepth 2 -type f -print
-
-      - name: Docker pull liquibase (para logar versão)
-        run: |
-          docker pull liquibase/liquibase:latest
-          docker run --rm liquibase/liquibase --version || true
+      - name: Garantir permissão ao script
+        run: chmod +x liquibase/scripts/ci_deploy.sh
 
       - name: PROD - deploy (script)
         id: prod_run
-        run: |
-          bash liquibase/scripts/ci_deploy.sh PROD
+        run: bash liquibase/scripts/ci_deploy.sh PROD
 
       - name: Publicar plano PROD (artefato)
         if: always()
@@ -147,51 +119,4 @@ jobs:
         with:
           name: plan-PROD
           path: plan_PROD.sql
-          if-no-files-found: ignore
-
-  # (Opcional) Job para agregar os 3 planos de SQL num único bundle, só se tudo passou.
-  bundle-plans:
-    name: Agregar planos SQL
-    runs-on: ubuntu-latest
-    needs: [prod-deploy]
-    if: ${{ needs.prod-deploy.result == 'success' }}
-    steps:
-      - name: Baixar plan-DEV
-        uses: actions/download-artifact@v4
-        with:
-          name: plan-DEV
-          path: ./plans
-
-      - name: Baixar plan-TEST
-        uses: actions/download-artifact@v4
-        with:
-          name: plan-TEST
-          path: ./plans
-
-      - name: Baixar plan-PROD
-        uses: actions/download-artifact@v4
-        with:
-          name: plan-PROD
-          path: ./plans
-
-      - name: Listar planos
-        run: |
-          echo "Arquivos de planos:"
-          ls -la ./plans
-          echo "Preview finais:"
-          for f in ./plans/*.sql; do
-            echo "==== $f (últimas 50 linhas) ===="
-            tail -n 50 "$f" || true
-          done
-
-      - name: Publicar bundle.zip
-        run: |
-          zip -r plans_bundle.zip ./plans
-        continue-on-error: true
-
-      - name: Upload bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: sql-plans-bundle
-          path: plans_bundle.zip
           if-no-files-found: ignore
