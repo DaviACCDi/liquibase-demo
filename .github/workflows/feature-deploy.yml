@@ -1,0 +1,46 @@
+name: Feature Deploy (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Ambiente para deploy"
+        required: true
+        type: choice
+        options: [dev, test]
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.env }} (branch: ${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    # usa o Environment para puxar o secret JDBC_URL correto
+    environment: ${{ inputs.env }}
+
+    # um deploy por ambiente por vez
+    concurrency:
+      group: db-${{ inputs.env }}
+      cancel-in-progress: false
+
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+
+    steps:
+      - name: Checkout (na branch escolhida no "Run workflow")
+        uses: actions/checkout@v4
+
+      - name: Permissão ao script
+        run: chmod +x liquibase/scripts/ci_deploy.sh
+
+      - name: Deploy em ${{ inputs.env }}
+        run: |
+          ENV_UPPER=$(echo "${{ inputs.env }}" | tr '[:lower:]' '[:upper:]')
+          bash liquibase/scripts/ci_deploy.sh "$ENV_UPPER"
+
+      - name: Artefato (plan)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ inputs.env }}
+          path: plan_*.sql
+          if-no-files-found: ignore

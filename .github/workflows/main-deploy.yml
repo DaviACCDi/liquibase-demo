@@ -1,0 +1,99 @@
+name: Main Deploy (dev → test → prod)
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  dev-deploy:
+    name: DEV Deploy
+    runs-on: ubuntu-latest
+    environment: dev
+    concurrency:
+      group: db-dev
+      cancel-in-progress: false
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x liquibase/scripts/ci_deploy.sh
+      - name: Deploy DEV
+        run: bash liquibase/scripts/ci_deploy.sh DEV
+      - name: Artefato (plan DEV)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-DEV
+          path: plan_DEV.sql
+          if-no-files-found: ignore
+
+  test-deploy:
+    name: TEST Deploy
+    runs-on: ubuntu-latest
+    needs: [dev-deploy]
+    environment: test
+    concurrency:
+      group: db-test
+      cancel-in-progress: false
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x liquibase/scripts/ci_deploy.sh
+      - name: Deploy TEST
+        run: bash liquibase/scripts/ci_deploy.sh TEST
+      - name: Artefato (plan TEST)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-TEST
+          path: plan_TEST.sql
+          if-no-files-found: ignore
+
+  prod-deploy:
+    name: PROD Deploy
+    runs-on: ubuntu-latest
+    needs: [test-deploy]
+    environment: prod         # configure reviewers no Environment "prod"
+    concurrency:
+      group: db-prod
+      cancel-in-progress: false
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x liquibase/scripts/ci_deploy.sh
+      - name: Deploy PROD
+        id: prod_run
+        run: bash liquibase/scripts/ci_deploy.sh PROD
+      - name: Artefato (plan PROD)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-PROD
+          path: plan_PROD.sql
+          if-no-files-found: ignore
+
+  # --- Rollback em cascata se PROD falhar ---
+  rollback-test-if-prod-failed:
+    name: Alinhar TEST (rollback 1) se PROD falhar
+    runs-on: ubuntu-latest
+    needs: [prod-deploy]
+    if: needs.prod-deploy.result == 'failure'
+    environment: test
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rollback TEST (1 changeset)
+        run: |
+          docker run --rm --network host -w /workspace \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile="/workspace/conf/liquibase-test.properties" \
+            --url="$JDBC_URL" \
+            rollbackCount 1 || true
