@@ -5,18 +5,17 @@ set -euo pipefail
 DEPLOYER="${GITHUB_ACTOR:-ci-runner}"
 
 run_liquibase () {
-  local PROPS="$1"
-  local URL="$2"
-  local WHAT="$3"
+  local PROPS="$1"; local URL="$2"; local WHAT="$3"
 
   docker run --rm --network host \
+    -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
     -v "$GITHUB_WORKSPACE/liquibase:/workspace" \
     liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --url="$URL" \
-    --changeLogProperty deployer="$DEPLOYER" \
     $WHAT
 }
+
 
 promote () {
   local ENV_NAME="$1"
