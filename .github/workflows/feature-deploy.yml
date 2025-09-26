@@ -39,20 +39,26 @@ jobs:
       JDBC_URL: ${{ secrets.JDBC_URL }}
 
     steps:
-      - name: Checkout (branch escolhida no Run workflow)
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Preflight (DEV)
+        shell: bash
         run: |
+          set -euo pipefail
           echo "Branch: $GITHUB_REF_NAME  | SHA: $GITHUB_SHA"
           test -n "${JDBC_URL:-}" || { echo "::error::[DEV] JDBC_URL ausente no Environment 'dev'"; exit 2; }
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
           test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-dev.properties" || { echo "::error::liquibase-dev.properties ausente"; exit 2; }
           test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
-          echo "JDBC_URL (mascarada):"
-          echo "$JDBC_URL" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/(password=)[^&]+/\1****/'
+          MASKED="$(echo "$JDBC_URL" | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
+          echo "JDBC_URL (mascarada): $MASKED"
+          if echo "$JDBC_URL" | grep -Eqi '\.internal|RENDER_DEFAULT_DB'; then
+            echo "::error::URL interna detectada. Use a EXTERNAL URL do Render (a mesma do DBeaver)."; exit 2
+          fi
 
       - name: Definir TAG_PRE (para rollback exato)
+        shell: bash
         run: |
           SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
           echo "TAG_PRE=feat-${SAFE_BRANCH}-${GITHUB_SHA}-pre" >> $GITHUB_ENV
@@ -66,16 +72,64 @@ jobs:
 
       - name: Liquibase plan-only (DEV)
         if: inputs.mode == 'plan-only'
+        shell: bash
         run: |
+          set -euo pipefail
+
+          # ---- parse/converte postgresql:// -> jdbc:postgresql:// (sem credenciais na URL) ----
+          parse_pg_url() {
+            local RURL="$1"
+            local REST="${RURL#postgres*://}"           # user:pass@host:port/db?query
+            local CREDS="${REST%%@*}"                   # user:pass
+            local HOSTPORT_DBQ="${REST#*@}"             # host:port/db?query
+            local HOSTPORT="${HOSTPORT_DBQ%%/*}"        # host:port
+            local DBQ="${HOSTPORT_DBQ#*/}"              # db?query
+
+            DB_USER="${CREDS%%:*}"
+            DB_PASS="${CREDS#*:}"
+            DB_HOST="${HOSTPORT%%:*}"
+            local PORT_PART="${HOSTPORT#*:}"
+            [[ "$PORT_PART" != "$HOSTPORT" ]] && DB_PORT="$PORT_PART" || DB_PORT="5432"
+
+            DB_NAME="${DBQ%%\?*}"
+            DB_QUERY=""
+            [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
+            # garante sslmode=require
+            if [[ -z "$DB_QUERY" ]]; then
+              DB_QUERY="sslmode=require"
+            elif [[ ! "$DB_QUERY" =~ (^|&)sslmode= ]]; then
+              DB_QUERY="${DB_QUERY}&sslmode=require"
+            fi
+            JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
+          }
+
+          if [[ "$JDBC_URL" =~ ^postgres(ql)?:// ]]; then
+            parse_pg_url "$JDBC_URL"
+          else
+            echo "::error::JDBC_URL não está no formato postgresql://"; exit 2
+          fi
+
+          echo "JDBC efetiva (masc.):  $(echo "$JDBC_URL_NOAUTH" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
+
           PROPS="liquibase-dev.properties"
+
           docker run --rm --network host -w /workspace \
             -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
             --defaultsFile="/workspace/conf/$PROPS" \
-            --url="$JDBC_URL" validate
+            --log-level=info \
+            --url="$JDBC_URL_NOAUTH" \
+            --username="$DB_USER" \
+            --password="$DB_PASS" \
+            validate
+
           docker run --rm --network host -w /workspace \
             -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
             --defaultsFile="/workspace/conf/$PROPS" \
-            --url="$JDBC_URL" updateSQL | tee "plan_DEV.sql"
+            --log-level=info \
+            --url="$JDBC_URL_NOAUTH" \
+            --username="$DB_USER" \
+            --password="$DB_PASS" \
+            updateSQL | tee "plan_DEV.sql"
 
       - name: Artefatos (plan DEV)
         if: always()
@@ -107,17 +161,10 @@ jobs:
             const repo  = context.repo.repo;
             const prNum = Number('${{ steps.findpr.outputs.number }}');
             const pr = (await github.pulls.get({ owner, repo, pull_number: prNum })).data;
-            await github.pulls.merge({
-              owner, repo, pull_number: prNum,
-              merge_method: 'squash',
-              commit_title: pr.title
-            });
+            await github.pulls.merge({ owner, repo, pull_number: prNum, merge_method: 'squash', commit_title: pr.title });
             const branch = context.ref.replace('refs/heads/','');
-            try {
-              await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
-            } catch (e) {
-              core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`);
-            }
+            try { await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` }); }
+            catch (e) { core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`); }
 
       - name: Comentar PR (falha + rollback) (DEV)
         if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && failure() && inputs.mode == 'apply'
@@ -146,20 +193,26 @@ jobs:
       JDBC_URL: ${{ secrets.JDBC_URL }}
 
     steps:
-      - name: Checkout (branch escolhida no Run workflow)
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Preflight (TEST)
+        shell: bash
         run: |
+          set -euo pipefail
           echo "Branch: $GITHUB_REF_NAME  | SHA: $GITHUB_SHA"
           test -n "${JDBC_URL:-}" || { echo "::error::[TEST] JDBC_URL ausente no Environment 'test'"; exit 2; }
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
           test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-test.properties" || { echo "::error::liquibase-test.properties ausente"; exit 2; }
           test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
-          echo "JDBC_URL (mascarada):"
-          echo "$JDBC_URL" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/(password=)[^&]+/\1****/'
+          MASKED="$(echo "$JDBC_URL" | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
+          echo "JDBC_URL (mascarada): $MASKED"
+          if echo "$JDBC_URL" | grep -Eqi '\.internal|RENDER_DEFAULT_DB'; then
+            echo "::error::URL interna detectada. Use a EXTERNAL URL do Render (a mesma do DBeaver)."; exit 2
+          fi
 
       - name: Definir TAG_PRE (para rollback exato)
+        shell: bash
         run: |
           SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
           echo "TAG_PRE=feat-${SAFE_BRANCH}-${GITHUB_SHA}-pre" >> $GITHUB_ENV
@@ -173,16 +226,62 @@ jobs:
 
       - name: Liquibase plan-only (TEST)
         if: inputs.mode == 'plan-only'
+        shell: bash
         run: |
+          set -euo pipefail
+
+          parse_pg_url() {
+            local RURL="$1"
+            local REST="${RURL#postgres*://}"
+            local CREDS="${REST%%@*}"
+            local HOSTPORT_DBQ="${REST#*@}"
+            local HOSTPORT="${HOSTPORT_DBQ%%/*}"
+            local DBQ="${HOSTPORT_DBQ#*/}"
+
+            DB_USER="${CREDS%%:*}"
+            DB_PASS="${CREDS#*:}"
+            DB_HOST="${HOSTPORT%%:*}"
+            local PORT_PART="${HOSTPORT#*:}"
+            [[ "$PORT_PART" != "$HOSTPORT" ]] && DB_PORT="$PORT_PART" || DB_PORT="5432"
+
+            DB_NAME="${DBQ%%\?*}"
+            DB_QUERY=""
+            [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
+            if [[ -z "$DB_QUERY" ]]; then
+              DB_QUERY="sslmode=require"
+            elif [[ ! "$DB_QUERY" =~ (^|&)sslmode= ]]; then
+              DB_QUERY="${DB_QUERY}&sslmode=require"
+            fi
+            JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
+          }
+
+          if [[ "$JDBC_URL" =~ ^postgres(ql)?:// ]]; then
+            parse_pg_url "$JDBC_URL"
+          else
+            echo "::error::JDBC_URL não está no formato postgresql://"; exit 2
+          fi
+
+          echo "JDBC efetiva (masc.):  $(echo "$JDBC_URL_NOAUTH" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
+
           PROPS="liquibase-test.properties"
+
           docker run --rm --network host -w /workspace \
             -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
             --defaultsFile="/workspace/conf/$PROPS" \
-            --url="$JDBC_URL" validate
+            --log-level=info \
+            --url="$JDBC_URL_NOAUTH" \
+            --username="$DB_USER" \
+            --password="$DB_PASS" \
+            validate
+
           docker run --rm --network host -w /workspace \
             -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
             --defaultsFile="/workspace/conf/$PROPS" \
-            --url="$JDBC_URL" updateSQL | tee "plan_TEST.sql"
+            --log-level=info \
+            --url="$JDBC_URL_NOAUTH" \
+            --username="$DB_USER" \
+            --password="$DB_PASS" \
+            updateSQL | tee "plan_TEST.sql"
 
       - name: Artefatos (plan TEST)
         if: always()
@@ -214,17 +313,10 @@ jobs:
             const repo  = context.repo.repo;
             const prNum = Number('${{ steps.findpr.outputs.number }}');
             const pr = (await github.pulls.get({ owner, repo, pull_number: prNum })).data;
-            await github.pulls.merge({
-              owner, repo, pull_number: prNum,
-              merge_method: 'squash',
-              commit_title: pr.title
-            });
+            await github.pulls.merge({ owner, repo, pull_number: prNum, merge_method: 'squash', commit_title: pr.title });
             const branch = context.ref.replace('refs/heads/','');
-            try {
-              await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
-            } catch (e) {
-              core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`);
-            }
+            try { await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` }); }
+            catch (e) { core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`); }
 
       - name: Comentar PR (falha + rollback) (TEST)
         if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && failure() && inputs.mode == 'apply'
