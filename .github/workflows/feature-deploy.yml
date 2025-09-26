@@ -72,64 +72,9 @@ jobs:
 
       - name: Liquibase plan-only (DEV)
         if: inputs.mode == 'plan-only'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # ---- parse/converte postgresql:// -> jdbc:postgresql:// (sem credenciais na URL) ----
-          parse_pg_url() {
-            local RURL="$1"
-            local REST="${RURL#postgres*://}"           # user:pass@host:port/db?query
-            local CREDS="${REST%%@*}"                   # user:pass
-            local HOSTPORT_DBQ="${REST#*@}"             # host:port/db?query
-            local HOSTPORT="${HOSTPORT_DBQ%%/*}"        # host:port
-            local DBQ="${HOSTPORT_DBQ#*/}"              # db?query
-
-            DB_USER="${CREDS%%:*}"
-            DB_PASS="${CREDS#*:}"
-            DB_HOST="${HOSTPORT%%:*}"
-            local PORT_PART="${HOSTPORT#*:}"
-            [[ "$PORT_PART" != "$HOSTPORT" ]] && DB_PORT="$PORT_PART" || DB_PORT="5432"
-
-            DB_NAME="${DBQ%%\?*}"
-            DB_QUERY=""
-            [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
-            # garante sslmode=require
-            if [[ -z "$DB_QUERY" ]]; then
-              DB_QUERY="sslmode=require"
-            elif [[ ! "$DB_QUERY" =~ (^|&)sslmode= ]]; then
-              DB_QUERY="${DB_QUERY}&sslmode=require"
-            fi
-            JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
-          }
-
-          if [[ "$JDBC_URL" =~ ^postgres(ql)?:// ]]; then
-            parse_pg_url "$JDBC_URL"
-          else
-            echo "::error::JDBC_URL não está no formato postgresql://"; exit 2
-          fi
-
-          echo "JDBC efetiva (masc.):  $(echo "$JDBC_URL_NOAUTH" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
-
-          PROPS="liquibase-dev.properties"
-
-          docker run --rm --network host -w /workspace \
-            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
-            --defaultsFile="/workspace/conf/$PROPS" \
-            --log-level=info \
-            --url="$JDBC_URL_NOAUTH" \
-            --username="$DB_USER" \
-            --password="$DB_PASS" \
-            validate
-
-          docker run --rm --network host -w /workspace \
-            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
-            --defaultsFile="/workspace/conf/$PROPS" \
-            --log-level=info \
-            --url="$JDBC_URL_NOAUTH" \
-            --username="$DB_USER" \
-            --password="$DB_PASS" \
-            updateSQL | tee "plan_DEV.sql"
+        env:
+          MODE: plan
+        run: bash liquibase/scripts/ci_deploy.sh DEV
 
       - name: Artefatos (plan DEV)
         if: always()
@@ -226,62 +171,9 @@ jobs:
 
       - name: Liquibase plan-only (TEST)
         if: inputs.mode == 'plan-only'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          parse_pg_url() {
-            local RURL="$1"
-            local REST="${RURL#postgres*://}"
-            local CREDS="${REST%%@*}"
-            local HOSTPORT_DBQ="${REST#*@}"
-            local HOSTPORT="${HOSTPORT_DBQ%%/*}"
-            local DBQ="${HOSTPORT_DBQ#*/}"
-
-            DB_USER="${CREDS%%:*}"
-            DB_PASS="${CREDS#*:}"
-            DB_HOST="${HOSTPORT%%:*}"
-            local PORT_PART="${HOSTPORT#*:}"
-            [[ "$PORT_PART" != "$HOSTPORT" ]] && DB_PORT="$PORT_PART" || DB_PORT="5432"
-
-            DB_NAME="${DBQ%%\?*}"
-            DB_QUERY=""
-            [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
-            if [[ -z "$DB_QUERY" ]]; then
-              DB_QUERY="sslmode=require"
-            elif [[ ! "$DB_QUERY" =~ (^|&)sslmode= ]]; then
-              DB_QUERY="${DB_QUERY}&sslmode=require"
-            fi
-            JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
-          }
-
-          if [[ "$JDBC_URL" =~ ^postgres(ql)?:// ]]; then
-            parse_pg_url "$JDBC_URL"
-          else
-            echo "::error::JDBC_URL não está no formato postgresql://"; exit 2
-          fi
-
-          echo "JDBC efetiva (masc.):  $(echo "$JDBC_URL_NOAUTH" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
-
-          PROPS="liquibase-test.properties"
-
-          docker run --rm --network host -w /workspace \
-            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
-            --defaultsFile="/workspace/conf/$PROPS" \
-            --log-level=info \
-            --url="$JDBC_URL_NOAUTH" \
-            --username="$DB_USER" \
-            --password="$DB_PASS" \
-            validate
-
-          docker run --rm --network host -w /workspace \
-            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
-            --defaultsFile="/workspace/conf/$PROPS" \
-            --log-level=info \
-            --url="$JDBC_URL_NOAUTH" \
-            --username="$DB_USER" \
-            --password="$DB_PASS" \
-            updateSQL | tee "plan_TEST.sql"
+        env:
+          MODE: plan
+        run: bash liquibase/scripts/ci_deploy.sh TEST
 
       - name: Artefatos (plan TEST)
         if: always()

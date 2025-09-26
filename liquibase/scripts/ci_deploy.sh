@@ -1,30 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ===================== Config =====================
 LB_DIR="${LB_DIR:-liquibase}"
 WORKDIR="${GITHUB_WORKSPACE:-$PWD}"
 DEPLOYER="${GITHUB_ACTOR:-ci-runner}"
-LIQUIBASE_LOG_LEVEL="${LIQUIBASE_LOG_LEVEL:-info}"
+LIQUIBASE_LOG_LEVEL="${LIQUIBASE_LOG_LEVEL:-info}"  # info|debug|trace
+MODE="${MODE:-apply}"   # apply | plan
 
-ENV_ARG="${1:-}"; [[ -z "$ENV_ARG" ]] && { echo "Uso: $0 <DEV|TEST|PROD>"; exit 2; }
-[[ -z "${JDBC_URL:-}" ]] && { echo "::error::JDBC_URL não encontrada no Environment"; exit 2; }
+ENV_ARG="${1:-}"
+if [[ -z "$ENV_ARG" ]]; then
+  echo "Uso: $0 <DEV|TEST|PROD>"
+  exit 2
+fi
 
+if [[ -z "${JDBC_URL:-}" ]]; then
+  echo "::error::JDBC_URL não encontrada no Environment"
+  exit 2
+fi
+
+# ===================== Helpers =====================
 mask_url() {
-  sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/([?&]password=)[^&]+/\1****/; s#//([^:@/]+):[^@/]+@#//\1:****@#' <<<"$1"
+  # esconde user:pass e host/db, e password= da query
+  sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/([?&]password=)[^&]+/\1****/g' <<<"$1"
 }
 
-# Variáveis globais preenchidas pelo parser
+# Globals extraídas do parser
 DB_USER=""; DB_PASS=""; DB_HOST=""; DB_PORT="5432"; DB_NAME=""; DB_QUERY=""
 JDBC_URL_NOAUTH=""
 
 parse_pg_url() {
   local RURL="$1"
   # aceita postgres:// ou postgresql://
-  local REST="${RURL#postgres*://}"           # user:pass@host:port/db?query
-  local CREDS="${REST%%@*}"                   # user:pass
-  local HOSTPORT_DBQ="${REST#*@}"             # host:port/db?query
-  local HOSTPORT="${HOSTPORT_DBQ%%/*}"        # host:port
-  local DBQ="${HOSTPORT_DBQ#*/}"              # db?query
+  local REST="${RURL#postgres*://}"      # user:pass@host:port/db?query
+  local CREDS="${REST%%@*}"              # user:pass
+  local HOSTPORT_DBQ="${REST#*@}"        # host:port/db?query
+  local HOSTPORT="${HOSTPORT_DBQ%%/*}"   # host:port
+  local DBQ="${HOSTPORT_DBQ#*/}"         # db?query
 
   DB_USER="${CREDS%%:*}"
   DB_PASS="${CREDS#*:}"
@@ -34,9 +46,11 @@ parse_pg_url() {
 
   DB_NAME="${DBQ%%\?*}"
   DB_QUERY=""
-  [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
+  if [[ "$DBQ" == *\?* ]]; then
+    DB_QUERY="${DBQ#*?}"
+  fi
 
-  # garante sslmode=require
+  # garante sslmode=require na query (sem duplicar)
   if [[ -z "$DB_QUERY" ]]; then
     DB_QUERY="sslmode=require"
   elif [[ ! "$DB_QUERY" =~ (^|&)sslmode= ]]; then
@@ -50,32 +64,32 @@ to_jdbc_and_creds() {
   local RURL="$1"
   if [[ "$RURL" =~ ^postgres(ql)?:// ]]; then
     parse_pg_url "$RURL"
-    echo "$JDBC_URL_NOAUTH"
   elif [[ "$RURL" =~ ^jdbc:postgresql:// ]]; then
-    # já é JDBC; extrair user/pass de query se existirem
     JDBC_URL_NOAUTH="$RURL"
+    # tenta extrair user/pass da query se houver (não obrigatório)
     if [[ "$RURL" =~ [\?&]user=([^&]+) ]]; then DB_USER="${BASH_REMATCH[1]}"; fi
     if [[ "$RURL" =~ [\?&]password=([^&]+) ]]; then DB_PASS="${BASH_REMATCH[1]}"; fi
-    echo "$JDBC_URL_NOAUTH"
   else
     echo "::error::Formato de URL não reconhecido: $(mask_url "$RURL")" >&2
     return 1
   fi
 }
 
+# ===================== Liquibase =====================
 run_liquibase () {
   local PROPS="$1"; local URL="$2"; local WHAT="$3"
   echo "+ liquibase $WHAT"
   echo "  - props: /workspace/conf/$PROPS"
   echo "  - url:   $(mask_url "$URL")"
   echo "  - user:  ${DB_USER:+****}  (pass oculto)"
+  echo
 
-  # listar conteúdo útil
+  # Conteúdo útil para debug
   docker run --rm --network host -w /workspace \
     -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
     bash -lc 'echo "[container] /workspace"; ls -la /workspace; echo "[container] /workspace/conf"; ls -la /workspace/conf; echo "[container] /workspace/changelogs"; ls -la /workspace/changelogs'
 
-  # executar
+  # Execução
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Ddeployer=${DEPLOYER}" \
     -e "LIQUIBASE_LOG_LEVEL=${LIQUIBASE_LOG_LEVEL}" \
@@ -91,11 +105,23 @@ run_liquibase () {
 promote () {
   local ENV_NAME="$1"; local PROPS="$2"; local URL="$3"
 
+  # Sanity
+  [[ -f "$WORKDIR/$LB_DIR/conf/$PROPS" ]] || { echo "::error::Arquivo de propriedades ausente: $LB_DIR/conf/$PROPS"; exit 2; }
+
   echo "===== [$ENV_NAME] VALIDATE ====="
   run_liquibase "$PROPS" "$URL" validate
 
   echo "===== [$ENV_NAME] STATUS ====="
   run_liquibase "$PROPS" "$URL" status --verbose || true
+
+  if [[ "$MODE" == "plan" ]]; then
+    echo "===== [$ENV_NAME] DRY-RUN (updateSQL) ====="
+    if ! run_liquibase "$PROPS" "$URL" updateSQL > "plan_${ENV_NAME}.sql"; then
+      echo "!!! updateSQL retornou erro (seguindo para logs)."
+    fi
+    tail -n 80 "plan_${ENV_NAME}.sql" || true
+    return 0
+  fi
 
   if [[ -n "${TAG_PRE:-}" ]]; then
     echo "===== [$ENV_NAME] TAG PRE ====="
@@ -125,20 +151,27 @@ promote () {
   run_liquibase "$PROPS" "$URL" history || true
 }
 
-# ========= Contexto + URL =========
-URL_EFETIVA="$(to_jdbc_and_creds "$JDBC_URL")" || exit 2
+# ===================== Contexto + URL =====================
+if echo "$JDBC_URL" | grep -Eqi '\.internal|RENDER_DEFAULT_DB'; then
+  echo "::error::URL interna detectada. Use a EXTERNAL URL do Render (pooler) com sslmode=require."
+  exit 2
+fi
+
+to_jdbc_and_creds "$JDBC_URL"
 
 echo "### Contexto"
 echo "ENV: $ENV_ARG"
+echo "MODE: $MODE"
 echo "TAG_PRE: ${TAG_PRE:-<none>}"
-echo "JDBC_URL (bruto, mascarada): $(mask_url "$JDBC_URL")"
-echo "JDBC (sem auth, mascarada):  $(mask_url "$URL_EFETIVA")"
+echo "JDBC_URL (masc.):  $(mask_url "$JDBC_URL")"
+echo "JDBC efetiva (masc.): $(mask_url "$JDBC_URL_NOAUTH")"
+echo
 
 case "$ENV_ARG" in
-  DEV)  promote "DEV"  "liquibase-dev.properties"  "$URL_EFETIVA" ;;
-  TEST) promote "TEST" "liquibase-test.properties" "$URL_EFETIVA" ;;
-  PROD) promote "PROD" "liquibase-prod.properties" "$URL_EFETIVA" ;;
+  DEV)  promote "DEV"  "liquibase-dev.properties"  "$JDBC_URL_NOAUTH" ;;
+  TEST) promote "TEST" "liquibase-test.properties" "$JDBC_URL_NOAUTH" ;;
+  PROD) promote "PROD" "liquibase-prod.properties" "$JDBC_URL_NOAUTH" ;;
   *) echo "Ambiente inválido: $ENV_ARG"; exit 2 ;;
 esac
 
-echo "✓ Fim do $ENV_ARG"
+echo "✓ Fim do $ENV_ARG ($MODE)"
