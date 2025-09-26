@@ -1,4 +1,4 @@
-name: DB Deploy (jobs com needs)
+name: Liquibase Deploy
 
 on:
   push:
@@ -9,114 +9,78 @@ jobs:
   dev-deploy:
     name: DEV Deploy
     runs-on: ubuntu-latest
+    environment: dev
     env:
       LB_DIR: liquibase
-      DEV_URL:  jdbc:postgresql://127.0.0.1:5432/appdb_dev
-    services:
-      postgres-dev:
-        image: postgres:15
-        env:
-          POSTGRES_USER: demo
-          POSTGRES_PASSWORD: demo
-          POSTGRES_DB: appdb_dev
-        ports: [ "5432:5432" ]
-        options: >-
-          --health-cmd "pg_isready -U demo"
-          --health-interval 5s --health-timeout 5s --health-retries 20
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Verificar arquivos
-        run: |
-          pwd
-          ls -la
-          ls -la liquibase/scripts || true
-          ls -la liquibase/conf || true
-          ls -la liquibase/changelogs || true
-
-      - name: Garantir permissão ao script
+      - name: Garantir permissão no script
         run: chmod +x liquibase/scripts/ci_deploy.sh
 
-      - name: DEV - deploy (script)
-        id: dev_run
+      - name: Rodar Liquibase no DEV
         run: bash liquibase/scripts/ci_deploy.sh DEV
 
-      - name: Publicar plano DEV (artefato)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: plan-DEV
-          path: plan_DEV.sql
-          if-no-files-found: ignore
+      - name: Conferir tabelas no DEV
+        run: |
+          echo "=== [DEV] Conferindo tabelas ==="
+          PGPASSWORD=$(echo $JDBC_URL | sed -E 's/.*password=([^&]+).*/\1/') \
+          psql "$(echo $JDBC_URL | sed -E 's/^jdbc:postgresql:/postgres:/')" \
+            -c "\dt"
 
   test-deploy:
     name: TEST Deploy
     runs-on: ubuntu-latest
     needs: [dev-deploy]
+    environment: test
     env:
       LB_DIR: liquibase
-      TEST_URL: jdbc:postgresql://127.0.0.1:5433/appdb_test
-    services:
-      postgres-test:
-        image: postgres:15
-        env:
-          POSTGRES_USER: demo
-          POSTGRES_PASSWORD: demo
-          POSTGRES_DB: appdb_test
-        ports: [ "5433:5432" ]
-        options: >-
-          --health-cmd "pg_isready -U demo"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@v4
+      JDBC_URL: ${{ secrets.JDBC_URL }}
 
-      - name: Garantir permissão ao script
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Garantir permissão no script
         run: chmod +x liquibase/scripts/ci_deploy.sh
 
-      - name: TEST - deploy (script)
-        id: test_run
+      - name: Rodar Liquibase no TEST
         run: bash liquibase/scripts/ci_deploy.sh TEST
 
-      - name: Publicar plano TEST (artefato)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: plan-TEST
-          path: plan_TEST.sql
-          if-no-files-found: ignore
+      - name: Conferir tabelas no TEST
+        run: |
+          echo "=== [TEST] Conferindo tabelas ==="
+          PGPASSWORD=$(echo $JDBC_URL | sed -E 's/.*password=([^&]+).*/\1/') \
+          psql "$(echo $JDBC_URL | sed -E 's/^jdbc:postgresql:/postgres:/')" \
+            -c "\dt"
 
   prod-deploy:
     name: PROD Deploy
     runs-on: ubuntu-latest
     needs: [test-deploy]
+    environment: 
+      name: prod
+      url: https://render.com     # opcional, só pra referência
     env:
       LB_DIR: liquibase
-      PROD_URL: jdbc:postgresql://127.0.0.1:5434/appdb_prod
-    services:
-      postgres-prod:
-        image: postgres:15
-        env:
-          POSTGRES_USER: demo
-          POSTGRES_PASSWORD: demo
-          POSTGRES_DB: appdb_prod
-        ports: [ "5434:5432" ]
-        options: >-
-          --health-cmd "pg_isready -U demo"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@v4
+      JDBC_URL: ${{ secrets.JDBC_URL }}
 
-      - name: Garantir permissão ao script
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Garantir permissão no script
         run: chmod +x liquibase/scripts/ci_deploy.sh
 
-      - name: PROD - deploy (script)
-        id: prod_run
+      - name: Rodar Liquibase no PROD
         run: bash liquibase/scripts/ci_deploy.sh PROD
 
-      - name: Publicar plano PROD (artefato)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: plan-PROD
-          path: plan_PROD.sql
-          if-no-files-found: ignore
+      - name: Conferir tabelas no PROD
+        run: |
+          echo "=== [PROD] Conferindo tabelas ==="
+          PGPASSWORD=$(echo $JDBC_URL | sed -E 's/.*password=([^&]+).*/\1/') \
+          psql "$(echo $JDBC_URL | sed -E 's/^jdbc:postgresql:/postgres:/')" \
+            -c "\dt"
