@@ -22,11 +22,11 @@ run_liquibase () {
   local PROPS="$1"; local URL="$2"; local WHAT="$3"
   echo "+ liquibase $WHAT (props=$PROPS url=$URL)"
   docker run --rm --network host \
+    -e "JAVA_OPTS=-Ddeployer=${DEPLOYER}" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
     liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --url="$URL" \
-    --parameter.deployer="$DEPLOYER" \
     $WHAT
 }
 
