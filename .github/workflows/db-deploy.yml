@@ -43,7 +43,7 @@ jobs:
       - name: DEV - deploy (script)
         id: dev_run
         run: |
-          bash ./ci_deploy.sh DEV
+          bash liquibase/scripts/ci_deploy.sh DEV
 
       - name: Publicar plano DEV (artefato)
         if: always()
@@ -91,7 +91,7 @@ jobs:
       - name: TEST - deploy (script)
         id: test_run
         run: |
-          bash ./ci_deploy.sh TEST
+          bash liquibase/scripts/ci_deploy.sh TEST
 
       - name: Publicar plano TEST (artefato)
         if: always()
@@ -139,7 +139,7 @@ jobs:
       - name: PROD - deploy (script)
         id: prod_run
         run: |
-          bash ./ci_deploy.sh PROD
+          bash liquibase/scripts/ci_deploy.sh PROD
 
       - name: Publicar plano PROD (artefato)
         if: always()
