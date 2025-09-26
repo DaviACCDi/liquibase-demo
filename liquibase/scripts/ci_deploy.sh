@@ -26,9 +26,10 @@ run_liquibase () {
     liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --url="$URL" \
-    --changelog-parameters.deployer="$DEPLOYER" \
+    --parameter.deployer="$DEPLOYER" \
     $WHAT
 }
+
 
 
 promote () {
