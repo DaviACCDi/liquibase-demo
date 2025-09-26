@@ -21,6 +21,15 @@ PROD_URL="${PROD_URL:-jdbc:postgresql://127.0.0.1:5434/appdb_prod}"
 run_liquibase () {
   local PROPS="$1"; local URL="$2"; local WHAT="$3"
   echo "+ liquibase $WHAT (props=$PROPS url=$URL)"
+
+  # Sanity check: lista conteúdo dentro do container
+  docker run --rm --network host \
+    -w /workspace \
+    -v "$WORKDIR/$LB_DIR:/workspace" \
+    liquibase/liquibase \
+    bash -lc 'echo "[container] ls /workspace"; ls -la /workspace; echo "[container] ls /workspace/changelogs"; ls -la /workspace/changelogs || true'
+
+  # Execução Liquibase
   docker run --rm --network host \
     -w /workspace \
     -e "JAVA_OPTS=-Ddeployer=${DEPLOYER}" \
@@ -28,9 +37,9 @@ run_liquibase () {
     liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --url="$URL" \
-    --searchPath="/workspace" \
     $WHAT
 }
+
 
 promote () {
   local ENV_NAME="$1"; local PROPS="$2"; local URL="$3"
