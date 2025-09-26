@@ -39,4 +39,16 @@
             <dropColumn tableName="person" columnName="email"/>
         </rollback>
     </changeSet>
+
+    <!-- 003: add email -->
+    <changeSet id="person-004" author="${deployer}">
+        <comment>Adiciona coluna pais</comment>
+        <addColumn tableName="person">
+            <column name="country" type="varchar(100)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="person" columnName="country"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>
