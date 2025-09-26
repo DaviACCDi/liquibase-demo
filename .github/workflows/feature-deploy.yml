@@ -1,46 +1,109 @@
-name: Feature Deploy (manual)
+name: Feature Deploy
 
 on:
   workflow_dispatch:
     inputs:
       env:
-        description: "Ambiente para deploy"
+        description: "Ambiente"
         required: true
         type: choice
         options: [dev, test]
+      mode:
+        description: "Ação"
+        required: true
+        type: choice
+        options: [apply, plan-only]
+        default: apply
+      auto_merge:
+        description: "Auto-merge PR -> main se DB OK"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.env }} (branch: ${{ github.ref_name }})
+    name: Deploy (${{ inputs.env }} / ${{ inputs.mode }})
     runs-on: ubuntu-latest
-    # usa o Environment para puxar o secret JDBC_URL correto
     environment: ${{ inputs.env }}
-
-    # um deploy por ambiente por vez
     concurrency:
-      group: db-${{ inputs.env }}
+      group: feature-db-${{ inputs.env }}
       cancel-in-progress: false
-
     env:
       LB_DIR: liquibase
       JDBC_URL: ${{ secrets.JDBC_URL }}
 
     steps:
-      - name: Checkout (na branch escolhida no "Run workflow")
+      - name: Checkout (branch escolhida no Run workflow)
         uses: actions/checkout@v4
 
       - name: Permissão ao script
         run: chmod +x liquibase/scripts/ci_deploy.sh
 
-      - name: Deploy em ${{ inputs.env }}
+      - name: Definir TAG_PRE (para rollback exato)
+        run: |
+          SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
+          echo "TAG_PRE=feat-${SAFE_BRANCH}-${GITHUB_SHA}-pre" >> $GITHUB_ENV
+          echo "TAG_PRE=$TAG_PRE"
+
+      - name: Liquibase apply
+        if: inputs.mode == 'apply'
+        env:
+          TAG_PRE: ${{ env.TAG_PRE }}
         run: |
           ENV_UPPER=$(echo "${{ inputs.env }}" | tr '[:lower:]' '[:upper:]')
           bash liquibase/scripts/ci_deploy.sh "$ENV_UPPER"
 
-      - name: Artefato (plan)
+      - name: Liquibase plan-only
+        if: inputs.mode == 'plan-only'
+        run: |
+          PROPS="liquibase-${{ inputs.env }}.properties"
+          docker run --rm --network host -w /workspace \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
+            --defaultsFile="/workspace/conf/$PROPS" \
+            --url="$JDBC_URL" validate
+          docker run --rm --network host -w /workspace \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
+            --defaultsFile="/workspace/conf/$PROPS" \
+            --url="$JDBC_URL" updateSQL | tee "plan_$(echo "${{ inputs.env }}" | tr a-z A-Z).sql"
+
+      - name: Artefatos (plan)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: plan-${{ inputs.env }}
           path: plan_*.sql
           if-no-files-found: ignore
+
+      # localizar PR aberto da branch -> main
+      - name: Encontrar PR aberto para main
+        if: inputs.auto_merge == 'true'
+        id: findpr
+        uses: peter-evans/find-pull-request@v3
+        with:
+          base: main
+          branch: ${{ github.ref_name }}
+
+      # se deploy OK, mergeia PR (respeita branch protection)
+      - name: Auto-merge PR
+        if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && success() && inputs.mode == 'apply'
+        uses: peter-evans/merge@v3
+        with:
+          pull-request: ${{ steps.findpr.outputs.pull-request-number }}
+          merge-method: squash
+          commit-message: pull-request-title
+          delete-branch: true
+
+      # se falhou, comenta no PR dizendo que foi feito rollback
+      - name: Comentar PR (falha + rollback)
+        if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && failure() && inputs.mode == 'apply'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ steps.findpr.outputs.pull-request-number }}
+          body: |
+            ❌ Deploy de **${{ inputs.env }}** falhou para `${{ github.sha }}`.
+            O workflow tentou **rollback para a tag `${{ env.TAG_PRE }}`** para manter o ambiente limpo.
+            Verifique os logs e ajuste o changeset antes de tentar novamente.
