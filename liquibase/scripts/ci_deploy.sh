@@ -1,171 +1,186 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ===================== Config =====================
 LB_DIR="${LB_DIR:-liquibase}"
 WORKDIR="${GITHUB_WORKSPACE:-$PWD}"
 DEPLOYER="${GITHUB_ACTOR:-ci-runner}"
-LIQUIBASE_LOG_LEVEL="${LIQUIBASE_LOG_LEVEL:-info}"  # info|debug|trace
-MODE="${MODE:-apply}"   # apply | plan
-
 ENV_ARG="${1:-}"
-if [[ -z "$ENV_ARG" ]]; then
+MODE="${MODE:-apply}"     # apply | plan
+
+if [[ -z "${ENV_ARG}" ]]; then
   echo "Uso: $0 <DEV|TEST|PROD>"
   exit 2
 fi
 
+# ===== URL do ambiente (obrigatória) =====
 if [[ -z "${JDBC_URL:-}" ]]; then
-  echo "::error::JDBC_URL não encontrada no Environment"
+  echo "::error::JDBC_URL não encontrada no Environment do GitHub (dev/test/prod)."
   exit 2
 fi
 
-# ===================== Helpers =====================
-mask_url() {
-  sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/([?&]password=)[^&]+/\1****/g' <<<"$1"
-}
-
+# ===== Parse seguro da URL (postgresql://user:pass@host[:port]/db?query) =====
 DB_USER=""; DB_PASS=""; DB_HOST=""; DB_PORT="5432"; DB_NAME=""; DB_QUERY=""
 JDBC_URL_NOAUTH=""
 
 parse_pg_url() {
   local RURL="$1"
-  if [[ "$RURL" != postgres://* && "$RURL" != postgresql://* ]]; then
-    echo "::error::URL não começa com postgres:// ou postgresql://"; return 1
-  fi
-  local REST="${RURL#*://}"             # user:pass@host:port/db?query
-  local CREDS="${REST%%@*}"             # user:pass
-  local HOSTPORT_DBQ="${REST#*@}"       # host:port/db?query
-  local HOSTPORT="${HOSTPORT_DBQ%%/*}"  # host:port
-  local DBQ="${HOSTPORT_DBQ#*/}"        # db?query
 
-  DB_USER="${CREDS%%:*}"
-  DB_PASS="${CREDS#*:}"
-  DB_HOST="${HOSTPORT%%:*}"
-  local PORT_PART="${HOSTPORT#*:}"
-  [[ "$PORT_PART" != "$HOSTPORT" ]] && DB_PORT="$PORT_PART" || DB_PORT="5432"
+  if [[ "$RURL" =~ ^postgres(ql)?:// ]]; then
+    local REST="${RURL#postgres*://}"         # user:pass@host:port/db?query
+    # exige credenciais (para não precisar por na query)
+    if [[ "$REST" != *"@"* ]]; then
+      echo "::error::URL sem credenciais: esperava postgresql://user:pass@host/db"; exit 2
+    fi
+    local CREDS="${REST%%@*}"                 # user:pass
+    local HOSTPORT_DBQ="${REST#*@}"           # host:port/db?query
+    local HOSTPORT="${HOSTPORT_DBQ%%/*}"      # host:port
+    local DBQ="${HOSTPORT_DBQ#*/}"            # db?query (ou vazio)
 
-  DB_NAME="${DBQ%%\?*}"
-  DB_QUERY=""
-  [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
+    DB_USER="${CREDS%%:*}"
+    DB_PASS="${CREDS#*:}"
 
-  # garante sslmode=require sem duplicar
-  if [[ -z "$DB_QUERY" ]]; then
-    DB_QUERY="sslmode=require"
+    DB_HOST="${HOSTPORT%%:*}"
+    local PORT_PART="${HOSTPORT#*:}"
+    [[ "$PORT_PART" != "$HOSTPORT" ]] && DB_PORT="$PORT_PART" || DB_PORT="5432"
+
+    DB_NAME="${DBQ%%\?*}"
+    [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}" || DB_QUERY=""
+
+    # limpa user/password da query e garante sslmode=require
+    local out_q=""; local have_ssl="0"
+    if [[ -n "$DB_QUERY" ]]; then
+      IFS='&' read -r -a parts <<<"$DB_QUERY"
+      for kv in "${parts[@]}"; do
+        [[ -z "$kv" ]] && continue
+        case "$kv" in
+          user=*|password=*) ;;               # ignora credenciais na query
+          sslmode=*) have_ssl="1"; out_q="${out_q:+$out_q&}$kv" ;;
+          *) out_q="${out_q:+$out_q&}$kv" ;;
+        esac
+      done
+    fi
+    [[ "$have_ssl" == "0" ]] && out_q="${out_q:+$out_q&}sslmode=require"
+
+    JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${out_q}"
   else
-    case "$DB_QUERY" in *sslmode=*) ;; *) DB_QUERY="${DB_QUERY}&sslmode=require" ;; esac
-  fi
-
-  JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
-
-  # Normalizações defensivas (caso tenha sobrado sujeira de versões antigas)
-  JDBC_URL_NOAUTH="${JDBC_URL_NOAUTH//??/?}"                           # remove '??'
-  JDBC_URL_NOAUTH="${JDBC_URL_NOAUTH//\?$DB_NAME\?/?}"                 # remove '?dbname?' acidental
-}
-
-to_jdbc_and_creds() {
-  local RURL="$1"
-  if [[ "$RURL" == postgres://* || "$RURL" == postgresql://* ]]; then
-    parse_pg_url "$RURL"
-  elif [[ "$RURL" == jdbc:postgresql://* ]]; then
-    JDBC_URL_NOAUTH="$RURL"
-    case "$RURL" in *"?user="*|*"&user="* ) DB_USER="$(sed -n 's/.*[?&]user=\([^&]*\).*/\1/p' <<<"$RURL")" ;; esac
-    case "$RURL" in *"?password="*|*"&password="* ) DB_PASS="$(sed -n 's/.*[?&]password=\([^&]*\).*/\1/p' <<<"$RURL")" ;; esac
-  else
-    echo "::error::Formato de URL não reconhecido: $(mask_url "$RURL")" >&2
-    return 1
+    echo "::error::A secret JDBC_URL deve ser a EXTERNAL URL do Render, no formato postgresql://user:pass@host/db"
+    exit 2
   fi
 }
 
-run_liquibase () {
-  local PROPS="$1"; local URL="$2"; local WHAT="$3"
-  echo "+ liquibase $WHAT"
-  echo "  - props: /workspace/conf/$PROPS"
-  echo "  - url:   $(mask_url "$URL")"
-  echo "  - user:  ${DB_USER:+****}  (pass oculto)"
-  echo
+parse_pg_url "$JDBC_URL"
+
+# ===== util =====
+mask() {
+  # mascara host/db e senha
+  local s="$1"
+  echo "$s" \
+    | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/(password=)[^&]+/\1****/g'
+}
+
+log_ctx() {
+  echo "### Contexto"
+  echo "ENV: $ENV_ARG"
+  echo "MODE: $MODE"
+  echo "Actor: $DEPLOYER"
+  echo "Workspace: $WORKDIR"
+  echo "LB_DIR: $LB_DIR"
+  echo "JDBC_URL (entrada, mascarada): $(mask "$JDBC_URL")"
+  echo "JDBC_URL efetiva (sem auth, mascarada): $(mask "$JDBC_URL_NOAUTH")"
+  echo "Host/Port/DB (masc): $(mask "jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}")"
+}
+
+tcp_probe() {
+  echo "[tcp] testando ${DB_HOST}:${DB_PORT} ..."
+  docker run --rm --network host bash:5 bash -lc "timeout 5 bash -c '</dev/tcp/${DB_HOST}/${DB_PORT}'" \
+    && echo "[tcp] OK" || { echo "::error::[tcp] Falha ao abrir TCP em ${DB_HOST}:${DB_PORT}"; exit 3; }
+}
+
+run_liquibase() {
+  local PROPS="$1"; local WHAT="$2"
+  echo "+ liquibase $WHAT (props=$PROPS)"
+  # lista conteúdo (debug)
   docker run --rm --network host -w /workspace \
     -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
-    bash -lc 'echo "[container] /workspace"; ls -la /workspace; echo "[container] /workspace/conf"; ls -la /workspace/conf; echo "[container] /workspace/changelogs"; ls -la /workspace/changelogs'
+    bash -lc 'echo "[container] /workspace:"; ls -la /workspace; ls -la /workspace/changelogs || true'
+
+  # executa
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Ddeployer=${DEPLOYER}" \
-    -e "LIQUIBASE_LOG_LEVEL=${LIQUIBASE_LOG_LEVEL}" \
     -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
-    --log-level="${LIQUIBASE_LOG_LEVEL}" \
-    --url="$URL" \
-    ${DB_USER:+--username="$DB_USER"} \
-    ${DB_PASS:+--password="$DB_PASS"} \
+    --log-level=info \
+    --url="$JDBC_URL_NOAUTH" \
+    --username="$DB_USER" \
+    --password="$DB_PASS" \
     $WHAT
 }
 
-promote () {
-  local ENV_NAME="$1"; local PROPS="$2"; local URL="$3"
-  [[ -f "$WORKDIR/$LB_DIR/conf/$PROPS" ]] || { echo "::error::Propriedades ausentes: $LB_DIR/conf/$PROPS"; exit 2; }
+promote() {
+  local ENV_NAME="$1"; local PROPS="$2"
 
   echo "===== [$ENV_NAME] VALIDATE ====="
-  run_liquibase "$PROPS" "$URL" validate
+  run_liquibase "$PROPS" validate
 
   echo "===== [$ENV_NAME] STATUS ====="
-  run_liquibase "$PROPS" "$URL" status --verbose || true
+  run_liquibase "$PROPS" status --verbose || true
 
   if [[ "$MODE" == "plan" ]]; then
     echo "===== [$ENV_NAME] DRY-RUN (updateSQL) ====="
-    if ! run_liquibase "$PROPS" "$URL" updateSQL > "plan_${ENV_NAME}.sql"; then
-      echo "!!! updateSQL retornou erro (seguindo para logs)."
+    if ! run_liquibase "$PROPS" updateSQL > "plan_${ENV_NAME}.sql"; then
+      echo "!!! updateSQL retornou erro (mantendo logs)."
     fi
-    tail -n 80 "plan_${ENV_NAME}.sql" || true
+    tail -n 60 "plan_${ENV_NAME}.sql" || true
     return 0
   fi
 
+  # tag de restauração opcional
   if [[ -n "${TAG_PRE:-}" ]]; then
-    echo "===== [$ENV_NAME] TAG PRE ====="
-    run_liquibase "$PROPS" "$URL" tag "$TAG_PRE" || true
+    echo "===== [$ENV_NAME] TAG_PRE ====="
+    run_liquibase "$PROPS" tag "$TAG_PRE" || true
   fi
 
   echo "===== [$ENV_NAME] DRY-RUN (updateSQL) ====="
-  if ! run_liquibase "$PROPS" "$URL" updateSQL > "plan_${ENV_NAME}.sql"; then
-    echo "!!! updateSQL retornou erro (seguindo para logs)."
-  fi
-  tail -n 80 "plan_${ENV_NAME}.sql" || true
+  run_liquibase "$PROPS" updateSQL > "plan_${ENV_NAME}.sql" || true
+  tail -n 60 "plan_${ENV_NAME}.sql" || true
 
   echo "===== [$ENV_NAME] UPDATE ====="
-  if ! run_liquibase "$PROPS" "$URL" update; then
-    echo "!!! UPDATE falhou em $ENV_NAME"
+  if ! run_liquibase "$PROPS" update; then
+    echo "!!! Falhou em $ENV_NAME"
     if [[ -n "${TAG_PRE:-}" ]]; then
       echo ">>> Rollback para tag $TAG_PRE"
-      run_liquibase "$PROPS" "$URL" rollbackToTag "$TAG_PRE" || true
+      run_liquibase "$PROPS" rollbackToTag "$TAG_PRE" || true
     else
-      echo ">>> RollbackCount 1"
-      run_liquibase "$PROPS" "$URL" rollbackCount 1 || true
+      echo ">>> Rollback de 1 changeset"
+      run_liquibase "$PROPS" rollbackCount 1 || true
     fi
     exit 1
   fi
 
   echo "===== [$ENV_NAME] HISTORY ====="
-  run_liquibase "$PROPS" "$URL" history || true
+  run_liquibase "$PROPS" history || true
 }
 
-# ===================== Contexto + URL =====================
-if echo "$JDBC_URL" | grep -Eqi '\.internal|RENDER_DEFAULT_DB'; then
-  echo "::error::URL interna detectada. Use a EXTERNAL URL do Render (pooler) com sslmode=require."
-  exit 2
-fi
-
-to_jdbc_and_creds "$JDBC_URL"
-
-echo "### Contexto"
-echo "ENV: $ENV_ARG"
-echo "MODE: $MODE"
-echo "TAG_PRE: ${TAG_PRE:-<none>}"
-echo "JDBC_URL (masc.):   $(mask_url "$JDBC_URL")"
-echo "JDBC efetiva (masc.): $(mask_url "$JDBC_URL_NOAUTH")"
+# ===== Logs iniciais e sanity =====
+log_ctx
+echo
+echo "Sanity dos arquivos:"
+test -f "$WORKDIR/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
+for f in "$WORKDIR/$LB_DIR"/conf/*.properties; do
+  echo "---- $f ----"
+  sed -n '1,120p' "$f" | sed 's/^password=.*/password=****/' || true
+done
 echo
 
+# teste de rede (explicita erro antes do Java)
+tcp_probe
+
+# ===== despacha por ambiente =====
 case "$ENV_ARG" in
-  DEV)  promote "DEV"  "liquibase-dev.properties"  "$JDBC_URL_NOAUTH" ;;
-  TEST) promote "TEST" "liquibase-test.properties" "$JDBC_URL_NOAUTH" ;;
-  PROD) promote "PROD" "liquibase-prod.properties" "$JDBC_URL_NOAUTH" ;;
-  *) echo "Ambiente inválido: $ENV_ARG"; exit 2 ;;
+  DEV)  promote "DEV"  "liquibase-dev.properties"  ;;
+  TEST) promote "TEST" "liquibase-test.properties" ;;
+  PROD) promote "PROD" "liquibase-prod.properties" ;;
+  *)    echo "Ambiente inválido: $ENV_ARG (use DEV|TEST|PROD)"; exit 2 ;;
 esac
 
 echo "✓ Fim do $ENV_ARG ($MODE)"
