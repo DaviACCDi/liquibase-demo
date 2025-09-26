@@ -16,6 +16,30 @@ if [[ -z "${JDBC_URL:-}" ]]; then
   exit 2
 fi
 
+# Converte postgres://user:pass@host:port/db?x=y -> jdbc:postgresql://host:port/db?x=y&user=user&password=pass
+to_jdbc () {
+  local RURL="$1"
+  if [[ "$RURL" =~ ^postgres(ql)?:// ]]; then
+    local REST="${RURL#postgres*://}"           # user:pass@host:port/db?query
+    local CREDS="${REST%%@*}"                   # user:pass
+    local HOSTPORT_DBQ="${REST#*@}"             # host:port/db?query
+    local HOSTPORT="${HOSTPORT_DBQ%%/*}"        # host:port
+    local DBQ="${HOSTPORT_DBQ#*/}"              # db?query
+    local USER="${CREDS%%:*}"
+    local PASS="${CREDS#*:}"
+    local HOST="${HOSTPORT%%:*}"
+    local PORT="${HOSTPORT#*:}"; [[ "$PORT" == "$HOST" ]] && PORT="5432"
+    local DB="${DBQ%%\?*}"
+    local QUERY=""; [[ "$DBQ" == *\?* ]] && QUERY="${DBQ#*?}"
+    [[ -z "$QUERY" ]] && QUERY="sslmode=require"
+    echo "jdbc:postgresql://${HOST}:${PORT}/${DB}?${QUERY}&user=${USER}&password=${PASS}"
+  else
+    echo "$RURL"
+  fi
+}
+
+URL_EFETIVA="$(to_jdbc "$JDBC_URL")"
+
 run_liquibase () {
   local PROPS="$1"; local URL="$2"; local WHAT="$3"
   echo "+ liquibase $WHAT (props=$PROPS)"
@@ -57,40 +81,19 @@ promote () {
   run_liquibase "$PROPS" "$URL" history || true
 }
 
-# ===== Logs de contexto (debug) =====
 echo "### Contexto do Runner"
 echo "Actor/Deployer: $DEPLOYER"
-echo "Workspace: $WORKDIR"
-echo "LB_DIR: $LB_DIR"
 echo "ENV alvo: $ENV_ARG"
-echo "JDBC_URL (host/db mascarados):"
+echo "JDBC_URL (entrada, mascarada):"
 echo "$JDBC_URL" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/(password=)[^&]+/\1****/'
-
-docker --version || true
-docker info --format '{{json .ServerVersion}}' 2>/dev/null || docker info || true
-echo
-echo "Arquivos Liquibase relevantes:"
-ls -la "$WORKDIR/$LB_DIR" || true
-ls -la "$WORKDIR/$LB_DIR/conf" || true
-ls -la "$WORKDIR/$LB_DIR/changelogs" || true
-
-echo
-echo "Sanity check dos changelogs:"
-test -f "$WORKDIR/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "Master não encontrado"; exit 2; }
-
-echo
-echo "Preview de properties:"
-for f in "$WORKDIR/$LB_DIR"/conf/*.properties; do
-  echo "---- $f ----"
-  sed -n '1,100p' "$f" | sed 's/^password=.*/password=****/' || true
-done
+echo "URL efetiva p/ JDBC (mascarada):"
+echo "$URL_EFETIVA" | sed -E 's#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/(password=)[^&]+/\1****/'
 echo
 
-# ===== Dispatch por ambiente (todos usam JDBC_URL do environment) =====
 case "$ENV_ARG" in
-  DEV)  promote "DEV"  "liquibase-dev.properties"  "$JDBC_URL" ;;
-  TEST) promote "TEST" "liquibase-test.properties" "$JDBC_URL" ;;
-  PROD) promote "PROD" "liquibase-prod.properties" "$JDBC_URL" ;;
+  DEV)  promote "DEV"  "liquibase-dev.properties"  "$URL_EFETIVA" ;;
+  TEST) promote "TEST" "liquibase-test.properties" "$URL_EFETIVA" ;;
+  PROD) promote "PROD" "liquibase-prod.properties" "$URL_EFETIVA" ;;
   *)    echo "Ambiente inválido: $ENV_ARG (use DEV|TEST|PROD)"; exit 2 ;;
 esac
 
