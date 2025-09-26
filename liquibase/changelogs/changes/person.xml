@@ -1,0 +1,42 @@
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <!-- 001: cria a tabela -->
+    <changeSet id="person-001" author="${deployer}">
+        <comment>Criação da tabela person</comment>
+        <createTable tableName="person">
+            <column name="id" type="int">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(255)"/>
+        </createTable>
+        <rollback>
+            <dropTable tableName="person"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 002: add age -->
+    <changeSet id="person-002" author="${deployer}">
+        <comment>Adiciona coluna age</comment>
+        <addColumn tableName="person">
+            <column name="age" type="int"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="person" columnName="age"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 003: add email -->
+    <changeSet id="person-003" author="${deployer}">
+        <comment>Adiciona coluna email</comment>
+        <addColumn tableName="person">
+            <column name="email" type="varchar(255)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="person" columnName="email"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
