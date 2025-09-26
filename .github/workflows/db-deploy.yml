@@ -9,24 +9,42 @@ jobs:
   db-deploy:
     runs-on: ubuntu-latest
 
+    env:
+      DEPLOYER: ${{ github.actor }}
+      LB_DIR: liquibase
+      DEV_URL:  jdbc:postgresql://127.0.0.1:5432/appdb_dev
+      TEST_URL: jdbc:postgresql://127.0.0.1:5433/appdb_test
+      PROD_URL: jdbc:postgresql://127.0.0.1:5434/appdb_prod
+
     services:
       postgres-dev:
         image: postgres:15
-        env: { POSTGRES_USER: demo, POSTGRES_PASSWORD: demo, POSTGRES_DB: appdb_dev }
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: demo
+          POSTGRES_DB: appdb_dev
         ports: [ "5432:5432" ]
         options: >-
           --health-cmd "pg_isready -U demo"
           --health-interval 5s --health-timeout 5s --health-retries 20
+
       postgres-test:
         image: postgres:15
-        env: { POSTGRES_USER: demo, POSTGRES_PASSWORD: demo, POSTGRES_DB: appdb_test }
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: demo
+          POSTGRES_DB: appdb_test
         ports: [ "5433:5432" ]
         options: >-
           --health-cmd "pg_isready -U demo"
           --health-interval 5s --health-timeout 5s --health-retries 20
+
       postgres-prod:
         image: postgres:15
-        env: { POSTGRES_USER: demo, POSTGRES_PASSWORD: demo, POSTGRES_DB: appdb_prod }
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: demo
+          POSTGRES_DB: appdb_prod
         ports: [ "5434:5432" ]
         options: >-
           --health-cmd "pg_isready -U demo"
@@ -36,14 +54,175 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Dar permissão ao script
-        run: chmod +x liquibase/scripts/ci_deploy.sh
+      - name: Mostrar versões / props / changelog
+        run: |
+          echo "Actor/Deployer: $DEPLOYER"
+          echo "==== Properties ===="
+          for f in $LB_DIR/conf/*.properties; do echo "--- $f"; cat "$f"; echo; done
+          echo "==== Master ===="
+          sed -n '1,200p' $LB_DIR/changelogs/db.changelog-master.xml || true
 
-      - name: Deploy dev → test → prod
-        run: bash liquibase/scripts/ci_deploy.sh
+      # ========== DEV ==========
+      - name: DEV - validate + plan + update + history
+        run: |
+          set -euo pipefail
+          echo "===== [DEV] VALIDATE"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-dev.properties \
+            --url="$DEV_URL" \
+            validate
 
+          echo "===== [DEV] updateSQL"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-dev.properties \
+            --url="$DEV_URL" \
+            updateSQL | tee plan_DEV.sql
+
+          echo "===== [DEV] update"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-dev.properties \
+            --url="$DEV_URL" \
+            update
+
+          echo "===== [DEV] history"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-dev.properties \
+            --url="$DEV_URL" \
+            history
+
+      # ========== TEST ==========
+      - name: TEST - validate + plan + update + history
+        run: |
+          set -euo pipefail
+          echo "===== [TEST] VALIDATE"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-test.properties \
+            --url="$TEST_URL" \
+            validate
+
+          echo "===== [TEST] updateSQL"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-test.properties \
+            --url="$TEST_URL" \
+            updateSQL | tee plan_TEST.sql
+
+          echo "===== [TEST] update"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-test.properties \
+            --url="$TEST_URL" \
+            update
+
+          echo "===== [TEST] history"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-test.properties \
+            --url="$TEST_URL" \
+            history
+
+      # Se etapa TEST falhar, roda rollback no TEST (mantém limpo)
+      - name: TEST - rollback último (on failure)
+        if: ${{ failure() && steps.TEST\ -\ validate\ +\ plan\ +\ update\ +\ history.conclusion == 'failure' }}
+        run: |
+          set -euo pipefail
+          echo "===== [TEST] rollbackCount 1 (falha detectada)"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-test.properties \
+            --url="$TEST_URL" \
+            rollbackCount 1 || true
+
+      # ========== PROD ==========
+      - name: PROD - validate + plan + update + history
+        run: |
+          set -euo pipefail
+          echo "===== [PROD] VALIDATE"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-prod.properties \
+            --url="$PROD_URL" \
+            validate
+
+          echo "===== [PROD] updateSQL"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-prod.properties \
+            --url="$PROD_URL" \
+            updateSQL | tee plan_PROD.sql
+
+          echo "===== [PROD] update"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-prod.properties \
+            --url="$PROD_URL" \
+            update
+
+          echo "===== [PROD] history"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-prod.properties \
+            --url="$PROD_URL" \
+            history
+
+      # Se PROD falhar: rollback PROD e TEST (mantém ambos iguais)
+      - name: PROD/TEST - rollback em cascata (on failure)
+        if: ${{ failure() }}
+        run: |
+          set -euo pipefail
+          echo "===== [PROD] rollbackCount 1 (falha detectada)"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-prod.properties \
+            --url="$PROD_URL" \
+            rollbackCount 1 || true
+
+          echo "===== [TEST] rollbackCount 1 (alinha com PROD)"
+          docker run --rm --network host \
+            -e LIQUIBASE_PARAMETER_deployer="$DEPLOYER" \
+            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \
+            liquibase/liquibase \
+            --defaultsFile=/workspace/conf/liquibase-test.properties \
+            --url="$TEST_URL" \
+            rollbackCount 1 || true
+
+      # Artefatos (planos SQL para revisão)
       - name: Publicar planos SQL (artefatos)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sql-plans
           path: |
