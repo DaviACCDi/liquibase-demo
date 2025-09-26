@@ -78,32 +78,56 @@ jobs:
           path: plan_*.sql
           if-no-files-found: ignore
 
-      # localizar PR aberto da branch -> main
+      # ====== Auto-merge sem usar actions de terceiros ======
+
+      # Encontrar PR aberto da branch atual -> main
       - name: Encontrar PR aberto para main
         if: inputs.auto_merge == 'true'
         id: findpr
-        uses: peter-evans/find-pull-request@v3
+        uses: actions/github-script@v7
         with:
-          base: main
-          branch: ${{ github.ref_name }}
+          script: |
+            const owner = context.repo.owner;
+            const repo  = context.repo.repo;
+            const head  = `${owner}:${context.ref.replace('refs/heads/','')}`;
+            const { data: prs } = await github.pulls.list({ owner, repo, state: 'open', head, base: 'main' });
+            core.setOutput('number', prs.length ? prs[0].number : '');
 
-      # se deploy OK, mergeia PR (respeita branch protection)
+      # Se apply OK, faz merge squash e tenta deletar a branch da feature
       - name: Auto-merge PR
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && success() && inputs.mode == 'apply'
-        uses: peter-evans/merge@v3
+        if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && success() && inputs.mode == 'apply'
+        uses: actions/github-script@v7
         with:
-          pull-request: ${{ steps.findpr.outputs.pull-request-number }}
-          merge-method: squash
-          commit-message: pull-request-title
-          delete-branch: true
+          script: |
+            const owner = context.repo.owner;
+            const repo  = context.repo.repo;
+            const prNum = Number('${{ steps.findpr.outputs.number }}');
 
-      # se falhou, comenta no PR dizendo que foi feito rollback
+            const pr = (await github.pulls.get({ owner, repo, pull_number: prNum })).data;
+
+            await github.pulls.merge({
+              owner, repo, pull_number: prNum,
+              merge_method: 'squash',
+              commit_title: pr.title
+            });
+
+            const branch = context.ref.replace('refs/heads/','');
+            try {
+              await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
+            } catch (e) {
+              core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`);
+            }
+
+      # Se falhou, comenta no PR informando que foi executado rollback
       - name: Comentar PR (falha + rollback)
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && failure() && inputs.mode == 'apply'
-        uses: peter-evans/create-or-update-comment@v4
+        if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && failure() && inputs.mode == 'apply'
+        uses: actions/github-script@v7
         with:
-          issue-number: ${{ steps.findpr.outputs.pull-request-number }}
-          body: |
-            ❌ Deploy de **${{ inputs.env }}** falhou para `${{ github.sha }}`.
-            O workflow tentou **rollback para a tag `${{ env.TAG_PRE }}`** para manter o ambiente limpo.
-            Verifique os logs e ajuste o changeset antes de tentar novamente.
+          script: |
+            const owner = context.repo.owner;
+            const repo  = context.repo.repo;
+            const prNum = Number('${{ steps.findpr.outputs.number }}');
+            const body  = `❌ Deploy de **${{ inputs.env }}** falhou para \`${process.env.GITHUB_SHA}\`.\n` +
+                          `Foi tentado **rollback até a tag \`${process.env.TAG_PRE || '(sem TAG_PRE)'}\`**.\n` +
+                          `Veja os logs e ajuste o changeset antes de tentar novamente.`;
+            await github.issues.createComment({ owner, repo, issue_number: prNum, body });
