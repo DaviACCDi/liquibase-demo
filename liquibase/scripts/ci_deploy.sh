@@ -21,32 +21,22 @@ fi
 
 # ===================== Helpers =====================
 mask_url() {
-  # esconde user:pass e host/db, e password= na query
   sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/([?&]password=)[^&]+/\1****/g' <<<"$1"
 }
 
-# Globals extraídas do parser
 DB_USER=""; DB_PASS=""; DB_HOST=""; DB_PORT="5432"; DB_NAME=""; DB_QUERY=""
 JDBC_URL_NOAUTH=""
 
 parse_pg_url() {
   local RURL="$1"
-
-  # aceita postgres:// ou postgresql:// (sem regex)
-  if [[ "$RURL" == postgres://* ]]; then
-    :
-  elif [[ "$RURL" == postgresql://* ]]; then
-    :
-  else
+  if [[ "$RURL" != postgres://* && "$RURL" != postgresql://* ]]; then
     echo "::error::URL não começa com postgres:// ou postgresql://"; return 1
   fi
-
-  # remove o prefixo até "://"
-  local REST="${RURL#*://}"               # user:pass@host:port/db?query
-  local CREDS="${REST%%@*}"               # user:pass
-  local HOSTPORT_DBQ="${REST#*@}"         # host:port/db?query
-  local HOSTPORT="${HOSTPORT_DBQ%%/*}"    # host:port
-  local DBQ="${HOSTPORT_DBQ#*/}"          # db?query
+  local REST="${RURL#*://}"             # user:pass@host:port/db?query
+  local CREDS="${REST%%@*}"             # user:pass
+  local HOSTPORT_DBQ="${REST#*@}"       # host:port/db?query
+  local HOSTPORT="${HOSTPORT_DBQ%%/*}"  # host:port
+  local DBQ="${HOSTPORT_DBQ#*/}"        # db?query
 
   DB_USER="${CREDS%%:*}"
   DB_PASS="${CREDS#*:}"
@@ -56,21 +46,20 @@ parse_pg_url() {
 
   DB_NAME="${DBQ%%\?*}"
   DB_QUERY=""
-  if [[ "$DBQ" == *\?* ]]; then
-    DB_QUERY="${DBQ#*?}"
-  fi
+  [[ "$DBQ" == *\?* ]] && DB_QUERY="${DBQ#*?}"
 
-  # garante sslmode=require na query (sem duplicar) — sem regex
+  # garante sslmode=require sem duplicar
   if [[ -z "$DB_QUERY" ]]; then
     DB_QUERY="sslmode=require"
   else
-    case "$DB_QUERY" in
-      *sslmode=*) : ;;  # já tem
-      *) DB_QUERY="${DB_QUERY}&sslmode=require" ;;
-    esac
+    case "$DB_QUERY" in *sslmode=*) ;; *) DB_QUERY="${DB_QUERY}&sslmode=require" ;; esac
   fi
 
   JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${DB_QUERY}"
+
+  # Normalizações defensivas (caso tenha sobrado sujeira de versões antigas)
+  JDBC_URL_NOAUTH="${JDBC_URL_NOAUTH//??/?}"                           # remove '??'
+  JDBC_URL_NOAUTH="${JDBC_URL_NOAUTH//\?$DB_NAME\?/?}"                 # remove '?dbname?' acidental
 }
 
 to_jdbc_and_creds() {
@@ -79,20 +68,14 @@ to_jdbc_and_creds() {
     parse_pg_url "$RURL"
   elif [[ "$RURL" == jdbc:postgresql://* ]]; then
     JDBC_URL_NOAUTH="$RURL"
-    # tenta extrair user/pass da query se houver (opcional)
-    case "$RURL" in
-      *"?user="*|*"&user="* ) DB_USER="$(sed -n 's/.*[?&]user=\([^&]*\).*/\1/p' <<<"$RURL")" ;; *) : ;;
-    esac
-    case "$RURL" in
-      *"?password="*|*"&password="* ) DB_PASS="$(sed -n 's/.*[?&]password=\([^&]*\).*/\1/p' <<<"$RURL")" ;; *) : ;;
-    esac
+    case "$RURL" in *"?user="*|*"&user="* ) DB_USER="$(sed -n 's/.*[?&]user=\([^&]*\).*/\1/p' <<<"$RURL")" ;; esac
+    case "$RURL" in *"?password="*|*"&password="* ) DB_PASS="$(sed -n 's/.*[?&]password=\([^&]*\).*/\1/p' <<<"$RURL")" ;; esac
   else
     echo "::error::Formato de URL não reconhecido: $(mask_url "$RURL")" >&2
     return 1
   fi
 }
 
-# ===================== Liquibase =====================
 run_liquibase () {
   local PROPS="$1"; local URL="$2"; local WHAT="$3"
   echo "+ liquibase $WHAT"
@@ -100,13 +83,9 @@ run_liquibase () {
   echo "  - url:   $(mask_url "$URL")"
   echo "  - user:  ${DB_USER:+****}  (pass oculto)"
   echo
-
-  # Conteúdo útil para debug
   docker run --rm --network host -w /workspace \
     -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
     bash -lc 'echo "[container] /workspace"; ls -la /workspace; echo "[container] /workspace/conf"; ls -la /workspace/conf; echo "[container] /workspace/changelogs"; ls -la /workspace/changelogs'
-
-  # Execução
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Ddeployer=${DEPLOYER}" \
     -e "LIQUIBASE_LOG_LEVEL=${LIQUIBASE_LOG_LEVEL}" \
@@ -121,8 +100,7 @@ run_liquibase () {
 
 promote () {
   local ENV_NAME="$1"; local PROPS="$2"; local URL="$3"
-
-  [[ -f "$WORKDIR/$LB_DIR/conf/$PROPS" ]] || { echo "::error::Arquivo de propriedades ausente: $LB_DIR/conf/$PROPS"; exit 2; }
+  [[ -f "$WORKDIR/$LB_DIR/conf/$PROPS" ]] || { echo "::error::Propriedades ausentes: $LB_DIR/conf/$PROPS"; exit 2; }
 
   echo "===== [$ENV_NAME] VALIDATE ====="
   run_liquibase "$PROPS" "$URL" validate
@@ -179,7 +157,7 @@ echo "### Contexto"
 echo "ENV: $ENV_ARG"
 echo "MODE: $MODE"
 echo "TAG_PRE: ${TAG_PRE:-<none>}"
-echo "JDBC_URL (masc.):  $(mask_url "$JDBC_URL")"
+echo "JDBC_URL (masc.):   $(mask_url "$JDBC_URL")"
 echo "JDBC efetiva (masc.): $(mask_url "$JDBC_URL_NOAUTH")"
 echo
 
