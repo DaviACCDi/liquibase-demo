@@ -1,4 +1,5 @@
 databaseChangeLog:
+  # 001: create product table
   - changeSet:
       id: product-001-create
       author: ${deployer}
@@ -9,13 +10,35 @@ databaseChangeLog:
         - createTable:
             tableName: product
             columns:
-              - column: { name: id, type: int generated always as identity, constraints: { primaryKey: true, nullable: false } }
-              - column: { name: sku, type: varchar(64), constraints: { nullable: false } }
-              - column: { name: name, type: varchar(255) }
-              - column: { name: price, type: numeric(10,2) }
-        - addUniqueConstraint: { tableName: product, columnNames: sku, constraintName: uq_product_sku }
-        - createIndex: { tableName: product, indexName: idx_product_sku, columns: [ { column: { name: sku } } ] }
+              - column:
+                  name: id
+                  type: int generated always as identity
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: sku
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: name
+                  type: varchar(255)
+              - column:
+                  name: price
+                  type: "numeric(10,2)"   # quote types with commas/parentheses
+        - addUniqueConstraint:
+            tableName: product
+            columnNames: sku
+            constraintName: uq_product_sku
+        - createIndex:
+            tableName: product
+            indexName: idx_product_sku
+            columns:
+              - column:
+                  name: sku
 
+  # 002: add category column with default
   - changeSet:
       id: product-002-add-category
       author: ${deployer}
@@ -26,4 +49,7 @@ databaseChangeLog:
         - addColumn:
             tableName: product
             columns:
-              - column: { name: category, type: varchar(120), defaultValue: general }
+              - column:
+                  name: category
+                  type: varchar(120)
+                  defaultValue: "general"
