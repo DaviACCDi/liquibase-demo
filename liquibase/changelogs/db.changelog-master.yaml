@@ -1,0 +1,11 @@
+databaseChangeLog:
+  # Reset first (if needed)
+  - include: { file: util/reset.yaml }
+
+  # Core tables
+  - include: { file: tables/person.yaml }
+  - include: { file: tables/product.yaml }
+  - include: { file: tables/order.yaml }
+
+  # Tag + Audit
+  - include: { file: util/meta.yaml }

@@ -1,0 +1,29 @@
+databaseChangeLog:
+  - changeSet:
+      id: product-001-create
+      author: ${deployer}
+      labels: "kind:${deployKind},table:product,topic:ddl,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "[${deployKind}] ${gitRef}@${gitSha} — create product"
+      changes:
+        - createTable:
+            tableName: product
+            columns:
+              - column: { name: id, type: int generated always as identity, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: sku, type: varchar(64), constraints: { nullable: false } }
+              - column: { name: name, type: varchar(255) }
+              - column: { name: price, type: numeric(10,2) }
+        - addUniqueConstraint: { tableName: product, columnNames: sku, constraintName: uq_product_sku }
+        - createIndex: { tableName: product, indexName: idx_product_sku, columns: [ { column: { name: sku } } ] }
+
+  - changeSet:
+      id: product-002-add-category
+      author: ${deployer}
+      labels: "kind:${deployKind},table:product,topic:ddl,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "[${deployKind}] ${gitRef}@${gitSha} — add category with default"
+      changes:
+        - addColumn:
+            tableName: product
+            columns:
+              - column: { name: category, type: varchar(120), defaultValue: general }

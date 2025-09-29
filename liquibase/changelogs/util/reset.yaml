@@ -1,0 +1,12 @@
+databaseChangeLog:
+  - changeSet:
+      id: reset-001-drop-all
+      author: ${deployer}
+      labels: "topic:reset,kind:ddl,ref:${gitRef},sha:${gitSha}"
+      context: reset
+      comment: "Reset database: drop core tables if they exist"
+      changes:
+        - dropTable: { tableName: order_header, cascadeConstraints: true, ifExists: true }
+        - dropTable: { tableName: product, cascadeConstraints: true, ifExists: true }
+        - dropTable: { tableName: person, cascadeConstraints: true, ifExists: true }
+        - dropTable: { tableName: lb_audit, cascadeConstraints: true, ifExists: true }

@@ -1,0 +1,39 @@
+name: DB Reset
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment to reset"
+        required: true
+        type: choice
+        options: [dev, test]
+
+jobs:
+  reset-db:
+    name: Reset ${{ inputs.env }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    concurrency:
+      group: db-${{ inputs.env }}-reset
+      cancel-in-progress: false
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight (${{ inputs.env }})
+        run: |
+          echo "Reset DB for ${{ inputs.env }} | SHA=$GITHUB_SHA"
+          test -x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh"
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ inputs.env }}.properties" || { echo "::error::liquibase-${{ inputs.env }}.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
+
+      - name: Run Liquibase Reset (${{ inputs.env }})
+        env:
+          TAG_PRE: reset-${{ inputs.env }}-${{ github.sha }}-pre
+        run: |
+          echo "TAG_PRE=$TAG_PRE"
+          bash liquibase/scripts/ci_deploy.sh ${{ inputs.env^^ }} --contexts=reset

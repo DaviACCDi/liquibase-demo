@@ -1,0 +1,53 @@
+databaseChangeLog:
+  - changeSet:
+      id: person-001-create
+      author: ${deployer}
+      labels: "kind:${deployKind},table:person,topic:ddl,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "[${deployKind}] ${gitRef}@${gitSha} — create person"
+      changes:
+        - createTable:
+            tableName: person
+            columns:
+              - column: { name: id, type: int generated always as identity, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: name, type: varchar(255), constraints: { nullable: false } }
+
+  - changeSet:
+      id: person-002-add-age
+      author: ${deployer}
+      labels: "kind:${deployKind},table:person,topic:ddl,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "[${deployKind}] ${gitRef}@${gitSha} — add age"
+      changes:
+        - addColumn:
+            tableName: person
+            columns:
+              - column: { name: age, type: int }
+
+  - changeSet:
+      id: person-003-add-email
+      author: ${deployer}
+      labels: "kind:${deployKind},table:person,topic:ddl,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "[${deployKind}] ${gitRef}@${gitSha} — add email with unique constraint"
+      changes:
+        - addColumn:
+            tableName: person
+            columns:
+              - column: { name: email, type: varchar(255) }
+        - addUniqueConstraint: { tableName: person, columnNames: email, constraintName: uq_person_email }
+        - createIndex: { tableName: person, indexName: idx_person_email, columns: [ { column: { name: email } } ] }
+
+  - changeSet:
+      id: person-004-add-country
+      author: ${deployer}
+      labels: "kind:${deployKind},table:person,topic:ddl,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "[${deployKind}] ${gitRef}@${gitSha} — add country with default and NOT NULL"
+      changes:
+        - addColumn:
+            tableName: person
+            columns:
+              - column: { name: country, type: varchar(100), defaultValue: Unknown }
+        - addNotNullConstraint: { tableName: person, columnName: country, columnDataType: varchar(100) }
+  
