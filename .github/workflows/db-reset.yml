@@ -1,5 +1,5 @@
 name: DB Reset
-run-name: "DB Reset – ${{ inputs.envs || 'manual' }} · ${{ inputs.mode }}"
+run-name: "DB Reset – ${{ inputs.envs || 'manual' }}"
 
 on:
   workflow_dispatch:
@@ -9,12 +9,6 @@ on:
         required: true
         type: string
         default: "dev"
-      mode:
-        description: "Ação"
-        required: true
-        type: choice
-        options: [apply, plan-only]
-        default: plan-only
       confirm:
         description: "Confirmo que desejo RESETAR os bancos selecionados"
         required: true
@@ -29,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       env_matrix: ${{ steps.mk.outputs.env_matrix }}
-      mode_norm:  ${{ steps.mk.outputs.mode_norm }}
     steps:
       - id: mk
         shell: bash
@@ -46,34 +39,27 @@ jobs:
             done
             ARR=$(printf '[%s]\n' "$(echo "$MAP" | sed 's/^/"/; s/$/"/' | paste -sd, -)")
           fi
-          MODE_NORM="${{ inputs.mode }}"
-          [[ "$MODE_NORM" == "plan-only" ]] && MODE_NORM="plan"
-          echo "env_matrix=$ARR"      >> "$GITHUB_OUTPUT"
-          echo "mode_norm=$MODE_NORM" >> "$GITHUB_OUTPUT"
+          echo "env_matrix=$ARR" >> "$GITHUB_OUTPUT"
 
   reset-db:
     needs: prepare
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
         env: ${{ fromJSON(needs.prepare.outputs.env_matrix) }}
-
-    name: "Reset ${{ matrix.env }} (${{ needs.prepare.outputs.mode_norm }})"
+    name: "Reset ${{ matrix.env }}"
     environment: ${{ matrix.env }}
-
     concurrency:
       group: db-${{ matrix.env }}-reset
       cancel-in-progress: false
-
     env:
       LB_DIR: liquibase
       JDBC_URL: ${{ matrix.env == 'dev'  && (secrets.JDBC_URL_DEV  || secrets.JDBC_URL) ||
                    matrix.env == 'test' && (secrets.JDBC_URL_TEST || secrets.JDBC_URL) ||
                                           (secrets.JDBC_URL_PROD || secrets.JDBC_URL) }}
       ENV_ARG: ${{ matrix.env }}
-      MODE:    ${{ needs.prepare.outputs.mode_norm }}
+      MODE: apply
 
     steps:
       - uses: actions/checkout@v4
@@ -82,11 +68,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Agora confirm é boolean: true/false
-          if [[ "${{ inputs.confirm }}" != "true" ]]; then
-            echo "::error::Marque a caixa de confirmação para prosseguir"
-            exit 2
-          fi
+          [[ "${{ inputs.confirm }}" == 'true' ]] || { echo "::error::Marque a confirmação para prosseguir"; exit 2; }
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
           test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ matrix.env }}.properties" \
             || { echo "::error::liquibase-${{ matrix.env }}.properties ausente"; exit 2; }
@@ -97,9 +79,10 @@ jobs:
         env:
           TAG_PRE: reset-${{ matrix.env }}-${{ github.sha }}-pre
         run: |
-          # Executa somente os changesets do contexto "reset"
+          # Executa apenas o contexto 'reset'
           bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}" --contexts=reset
 
+      # Opcional: anexar o plan (útil pra auditoria)
       - name: Upload plan (${{ matrix.env }})
         if: always()
         uses: actions/upload-artifact@v4

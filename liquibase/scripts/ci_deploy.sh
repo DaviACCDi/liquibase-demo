@@ -148,12 +148,21 @@ promote() {
 
   tcp_probe
 
-  # Se for reset: aplica somente o contexto 'reset' e encerra
+  # Se for reset: executa somente o contexto 'reset'
   if [[ " ${EXTRA_ARGS[*]} " == *"--contexts=reset"* ]]; then
-    echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME e encerrando…"
-    run_liquibase "$PROPS" update
+    echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME…"
+    local PLAN_FILE="plan_${ENV_NAME}.sql"
+    if [[ "$MODE" == "plan" ]]; then
+      # DRY RUN do reset
+      run_liquibase "$PROPS" updateSQL > "$PLAN_FILE"
+      tail -n 80 "$PLAN_FILE" || true
+    else
+      # apply do reset
+      run_liquibase "$PROPS" update
+    fi
     return 0
   fi
+
 
   echo "===== [$ENV_NAME] VALIDATE ====="
   run_liquibase "$PROPS" validate
