@@ -1,6 +1,6 @@
 # changelogs/util/audit.yaml
 databaseChangeLog:
-  # Cria a tabela se (e somente se) ela ainda não existir
+  # Cria a tabela só se NÃO existir
   - changeSet:
       id: audit-001-create-table
       author: system
@@ -8,11 +8,9 @@ databaseChangeLog:
       preConditions:
         onFail: MARK_RAN
         onError: HALT
-        nestedPreconditions: AND
-        preConditions:
-          - not:
-              tableExists:
-                tableName: lb_audit
+        not:
+          tableExists:
+            tableName: lb_audit
       changes:
         - createTable:
             tableName: lb_audit
@@ -26,18 +24,17 @@ databaseChangeLog:
               - column: { name: kind,       type: VARCHAR(64) }
               - column: { name: created_at, type: TIMESTAMP WITHOUT TIME ZONE, defaultValueComputed: NOW() }
 
-  # Garante colunas (caso a tabela tenha sido criada diferente no passado)
+  # Garante colunas, só se estiverem faltando
   - changeSet:
       id: audit-002-ensure-col-event
       author: system
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: event
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: event
       changes:
         - addColumn:
             tableName: lb_audit
@@ -50,11 +47,10 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: env
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: env
       changes:
         - addColumn:
             tableName: lb_audit
@@ -67,11 +63,10 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: sha
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: sha
       changes:
         - addColumn:
             tableName: lb_audit
@@ -84,11 +79,10 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: branch
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: branch
       changes:
         - addColumn:
             tableName: lb_audit
@@ -101,11 +95,10 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: actor
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: actor
       changes:
         - addColumn:
             tableName: lb_audit
@@ -118,11 +111,10 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: kind
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: kind
       changes:
         - addColumn:
             tableName: lb_audit
@@ -135,11 +127,10 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        preConditions:
-          - not:
-              columnExists:
-                tableName: lb_audit
-                columnName: created_at
+        not:
+          columnExists:
+            tableName: lb_audit
+            columnName: created_at
       changes:
         - addColumn:
             tableName: lb_audit
