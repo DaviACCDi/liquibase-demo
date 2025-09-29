@@ -1,11 +1,21 @@
 databaseChangeLog:
-  # Reset first (if needed)
-  - include: { file: util/reset.yaml }
+  # --- Tables ---
+  - include:
+      file: tables/person.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: tables/product.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: tables/order.yaml
+      relativeToChangelogFile: true
 
-  # Core tables
-  - include: { file: tables/person.yaml }
-  - include: { file: tables/product.yaml }
-  - include: { file: tables/order.yaml }
+  # --- Meta (tags/audit) ---
+  - include:
+      file: util/meta.yaml
+      relativeToChangelogFile: true
 
-  # Tag + Audit
-  - include: { file: util/meta.yaml }
+  # --- Reset (explicity --contexts=reset) ---
+  - include:
+      file: util/reset.yaml
+      relativeToChangelogFile: true
