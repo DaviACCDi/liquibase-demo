@@ -1,0 +1,41 @@
+# .github/workflows/sync-env-branches.yml
+name: Sync env branches from main
+
+on:
+  workflow_run:
+    workflows: ["Main Deploy (dev → test → prod)"]  # nome exato do workflow de deploy
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup git user
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Push main into env branches (fast-forward if possível; senão força com lease)
+        run: |
+          git fetch origin
+
+          for B in dev test prod; do
+            # tenta fast-forward normal
+            if git merge-base --is-ancestor origin/$B origin/main; then
+              echo "[FF] $B <- main"
+              git push origin main:$B
+            else
+              echo "[FORCE-WITH-LEASE] $B <- main (branches divergiram)"
+              git push --force-with-lease origin main:$B
+            fi
+          done
