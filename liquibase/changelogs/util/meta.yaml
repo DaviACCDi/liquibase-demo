@@ -27,7 +27,7 @@ databaseChangeLog:
       context: tag_pre
       comment: "Tag PRE ${TAG_PRE}"
       changes:
-        - tagDatabase: { tag: ${TAG_PRE} }
+        - tagDatabase: { tag: "${TAG_PRE}" }
 
   - changeSet:
       id: audit-pre-${TAG_PRE}
@@ -49,7 +49,7 @@ databaseChangeLog:
       context: tag_post
       comment: "Tag POST ${TAG_POST}"
       changes:
-        - tagDatabase: { tag: ${TAG_POST} }
+        - tagDatabase: { tag: "${TAG_POST}" }
 
   - changeSet:
       id: audit-post-${TAG_POST}
