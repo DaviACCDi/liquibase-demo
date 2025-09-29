@@ -28,13 +28,13 @@ JDBC_URL_NOAUTH=""; JDBC_URL_CURRENT=""
 parse_pg_url() {
   local RURL="$1"
   [[ "$RURL" =~ ^postgres(ql)?:// ]] || { echo "::error::Use EXTERNAL URL (postgresql://user:pass@host/db)"; exit 2; }
-  local REST="${RURL#postgres*://}"                # user:pass@host:port/db?query
+  local REST="${RURL#postgres*://}"
   [[ "$REST" == *"@"* ]] || { echo "::error::URL without credentials (expected user:pass@)"; exit 2; }
 
-  local CREDS="${REST%%@*}"                        # user:pass
-  local HOSTPORT_DBQ="${REST#*@}"                  # host:port/db?query
-  local HOSTPORT="${HOSTPORT_DBQ%%/*}"             # host:port
-  local DBQ="${HOSTPORT_DBQ#*/}"                   # db?query
+  local CREDS="${REST%%@*}"
+  local HOSTPORT_DBQ="${REST#*@}"
+  local HOSTPORT="${HOSTPORT_DBQ%%/*}"
+  local DBQ="${HOSTPORT_DBQ#*/}"
 
   DB_USER="${CREDS%%:*}"
   DB_PASS="${CREDS#*:}"
@@ -53,7 +53,7 @@ parse_pg_url() {
     for kv in "${parts[@]}"; do
       [[ -z "$kv" ]] && continue
       case "$kv" in
-        user=*|password=*) ;;                    # não replicar credenciais
+        user=*|password=*) ;;
         sslmode=*) have_ssl="1"; out_q="${out_q:+$out_q&}$kv" ;;
         *) out_q="${out_q:+$out_q&}$kv" ;;
       esac
@@ -119,6 +119,22 @@ env_props() {
   esac
 }
 
+# Função para auditar
+log_audit() {
+  local EVENT="$1"
+  local KIND="${DEPLOY_KIND:-unknown}"
+  local SHA="${GITHUB_SHA:-unknown}"
+  local BRANCH="${GITHUB_REF_NAME:-unknown}"
+
+  echo "[AUDIT] $ENV_NAME $EVENT ($KIND) sha=$SHA branch=$BRANCH actor=$DEPLOYER"
+
+  docker run --rm --network host \
+    -e PGPASSWORD="$DB_PASS" postgres:15 \
+    psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
+    -c "INSERT INTO lb_audit (event, env, sha, branch, actor, kind)
+        VALUES ('$EVENT', '$ENV_NAME', '$SHA', '$BRANCH', '$DEPLOYER', '$KIND');" || true
+}
+
 # Seleciona a URL do ambiente atual:
 pick_jdbc_for_env() {
   local E="$1"
@@ -148,21 +164,18 @@ promote() {
 
   tcp_probe
 
-  # Se for reset: executa somente o contexto 'reset'
+  # Se for reset
   if [[ " ${EXTRA_ARGS[*]} " == *"--contexts=reset"* ]]; then
     echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME…"
     local PLAN_FILE="plan_${ENV_NAME}.sql"
     if [[ "$MODE" == "plan" ]]; then
-      # DRY RUN do reset
       run_liquibase "$PROPS" updateSQL > "$PLAN_FILE"
       tail -n 80 "$PLAN_FILE" || true
     else
-      # apply do reset
       run_liquibase "$PROPS" update
     fi
     return 0
   fi
-
 
   echo "===== [$ENV_NAME] VALIDATE ====="
   run_liquibase "$PROPS" validate
@@ -182,24 +195,25 @@ promote() {
 
   [[ "$MODE" == "plan" ]] && return 0
 
-  # tagging “pre”
+  # tagging + audit
   local SHA_SHORT="${GITHUB_SHA:-unknown}"; SHA_SHORT="${SHA_SHORT:0:7}"
   local TAG_PRE="auto-${ENV_NAME,,}-${SHA_SHORT}-pre"
   local TAG_POST="${TAG_PRE%-pre}-post-${DEPLOY_KIND//[^a-zA-Z0-9:_-]/_}"
 
-  echo "===== [$ENV_NAME] TAG_PRE ($TAG_PRE) ====="
   run_liquibase "$PROPS" tag "$TAG_PRE" || true
+  log_audit "pre"
 
   echo "===== [$ENV_NAME] UPDATE ====="
   if ! run_liquibase "$PROPS" update; then
     echo "!!! Failed in $ENV_NAME → rollback"
-    # FIX: rollback correto
     run_liquibase "$PROPS" rollback --tag "$TAG_PRE" || true
+    log_audit "rollback"
     exit 1
   fi
 
-  echo "===== [$ENV_NAME] TAG_POST ($TAG_POST) ====="
   run_liquibase "$PROPS" tag "$TAG_POST" || true
+  log_audit "post"
+
   echo "===== [$ENV_NAME] HISTORY ====="
   run_liquibase "$PROPS" history || true
 }
@@ -222,14 +236,13 @@ else
   IFS=',' read -r -a ENV_LIST <<<"${ENV_LIST_RAW^^}"
 fi
 
-# Para cada ambiente, seleciona JDBC_URL adequado e executa a ação
+# Para cada ambiente
 for ENV in "${ENV_LIST[@]}"; do
   case "$ENV" in
     DEV|TEST|PROD) ;;
-    *) echo "Invalid environment in list: $ENV (use DEV|TEST|PROD|ALL)"; exit 2 ;;
+    *) echo "Invalid environment in list: $ENV"; exit 2 ;;
   esac
 
-  # Seleciona URL por ambiente (JDBC_URL_DEV/TEST/PROD ou JDBC_URL)
   pick_jdbc_for_env "$ENV"
 
   case "$MODE" in

@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: audit-001-create-table
+      author: system
+      context: meta
+      changes:
+        - createTable:
+            tableName: lb_audit
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+              - column: { name: event,   type: varchar(50) }
+              - column: { name: env,     type: varchar(10) }
+              - column: { name: sha,     type: varchar(64) }
+              - column: { name: branch,  type: varchar(128) }
+              - column: { name: actor,   type: varchar(64) }
+              - column: { name: kind,    type: varchar(64) }
+              - column: { name: created_at, type: timestamp, defaultValueComputed: CURRENT_TIMESTAMP }
