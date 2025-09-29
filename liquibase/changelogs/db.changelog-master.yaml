@@ -1,21 +1,11 @@
+# liquibase/changelogs/db.changelog-master.yaml
 databaseChangeLog:
-  # --- Tables ---
-  - include:
-      file: tables/person.yaml
-      relativeToChangelogFile: true
-  - include:
-      file: tables/product.yaml
-      relativeToChangelogFile: true
-  - include:
-      file: tables/order.yaml
-      relativeToChangelogFile: true
+  - include: { file: tables/person.yaml }
+  - include: { file: tables/product.yaml }
+  - include: { file: tables/order.yaml }
 
-  # --- Meta (tags/audit) ---
-  - include:
-      file: util/meta.yaml
-      relativeToChangelogFile: true
+  # Auditoria (apenas cria tabela; inserts são feitos pelo script bash)
+  - include: { file: util/audit.yaml }
 
-  # --- Reset (explicity --contexts=reset) ---
-  - include:
-      file: util/reset.yaml
-      relativeToChangelogFile: true
+  # Reset (context=reset)
+  - include: { file: util/reset.yaml }
