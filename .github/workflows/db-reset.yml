@@ -1,4 +1,5 @@
 name: DB Reset
+run-name: "DB Reset – ${{ inputs.env || 'manual' }}"
 
 on:
   workflow_dispatch:

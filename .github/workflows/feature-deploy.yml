@@ -1,21 +1,24 @@
 name: Feature Deploy
 
 on:
+  push:
+    branches-ignore:
+      - main   # do not run automatically on main (handled by main-deploy.yml)
   workflow_dispatch:
     inputs:
       env:
-        description: "Ambiente"
+        description: "Environment"
         required: true
         type: choice
         options: [dev, test]
       mode:
-        description: "Ação"
+        description: "Action"
         required: true
         type: choice
         options: [apply, plan-only]
         default: apply
       auto_merge:
-        description: "Auto-merge PR -> main se DB OK"
+        description: "Auto-merge PR -> main if DB OK"
         required: false
         type: boolean
         default: false
@@ -27,8 +30,8 @@ permissions:
 jobs:
   # ===================== DEV =====================
   deploy-dev:
-    if: ${{ inputs.env == 'dev' }}
-    name: Deploy (DEV / ${{ inputs.mode }})
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.env == 'dev' || github.event_name == 'push' && github.ref != 'refs/heads/main' }}
+    name: Deploy (DEV / ${{ inputs.mode || 'apply' }})
     runs-on: ubuntu-latest
     environment: dev
     concurrency:
@@ -47,17 +50,14 @@ jobs:
         run: |
           set -euo pipefail
           echo "Branch: $GITHUB_REF_NAME  | SHA: $GITHUB_SHA"
-          test -n "${JDBC_URL:-}" || { echo "::error::[DEV] JDBC_URL ausente no Environment 'dev'"; exit 2; }
+          test -n "${JDBC_URL:-}" || { echo "::error::[DEV] JDBC_URL missing in Environment 'dev'"; exit 2; }
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-dev.properties" || { echo "::error::liquibase-dev.properties ausente"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-dev.properties" || { echo "::error::liquibase-dev.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
           MASKED="$(echo "$JDBC_URL" | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
-          echo "JDBC_URL (mascarada): $MASKED"
-          if echo "$JDBC_URL" | grep -Eqi '\.internal|RENDER_DEFAULT_DB'; then
-            echo "::error::URL interna detectada. Use a EXTERNAL URL do Render (a mesma do DBeaver)."; exit 2
-          fi
+          echo "JDBC_URL (masked): $MASKED"
 
-      - name: Definir TAG_PRE (para rollback exato)
+      - name: Define TAG_PRE (for rollback)
         shell: bash
         run: |
           SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
@@ -65,18 +65,18 @@ jobs:
           echo "TAG_PRE=$TAG_PRE"
 
       - name: Liquibase apply (DEV)
-        if: inputs.mode == 'apply'
+        if: inputs.mode == 'apply' || github.event_name == 'push'
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
         run: bash liquibase/scripts/ci_deploy.sh DEV
 
       - name: Liquibase plan-only (DEV)
-        if: inputs.mode == 'plan-only'
+        if: inputs.mode == 'plan-only' && github.event_name == 'workflow_dispatch'
         env:
           MODE: plan
         run: bash liquibase/scripts/ci_deploy.sh DEV
 
-      - name: Artefatos (plan DEV)
+      - name: Artifacts (plan DEV)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -84,49 +84,9 @@ jobs:
           path: plan_DEV.sql
           if-no-files-found: ignore
 
-      # ---- Auto-merge (sem actions de terceiros) ----
-      - name: Encontrar PR aberto para main
-        if: inputs.auto_merge == 'true'
-        id: findpr
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const head  = `${owner}:${context.ref.replace('refs/heads/','')}`;
-            const { data: prs } = await github.pulls.list({ owner, repo, state: 'open', head, base: 'main' });
-            core.setOutput('number', prs.length ? prs[0].number : '');
-
-      - name: Auto-merge PR (DEV)
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && success() && inputs.mode == 'apply'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const prNum = Number('${{ steps.findpr.outputs.number }}');
-            const pr = (await github.pulls.get({ owner, repo, pull_number: prNum })).data;
-            await github.pulls.merge({ owner, repo, pull_number: prNum, merge_method: 'squash', commit_title: pr.title });
-            const branch = context.ref.replace('refs/heads/','');
-            try { await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` }); }
-            catch (e) { core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`); }
-
-      - name: Comentar PR (falha + rollback) (DEV)
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && failure() && inputs.mode == 'apply'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const prNum = Number('${{ steps.findpr.outputs.number }}');
-            const body  = `❌ Deploy de **DEV** falhou para \`${process.env.GITHUB_SHA}\`.\n` +
-                          `Foi tentado **rollback até a tag \`${process.env.TAG_PRE || '(sem TAG_PRE)'}\`**.\n` +
-                          `Veja os logs e ajuste o changeset antes de tentar novamente.`;
-            await github.issues.createComment({ owner, repo, issue_number: prNum, body });
-
   # ===================== TEST =====================
   deploy-test:
-    if: ${{ inputs.env == 'test' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.env == 'test' }}
     name: Deploy (TEST / ${{ inputs.mode }})
     runs-on: ubuntu-latest
     environment: test
@@ -146,17 +106,14 @@ jobs:
         run: |
           set -euo pipefail
           echo "Branch: $GITHUB_REF_NAME  | SHA: $GITHUB_SHA"
-          test -n "${JDBC_URL:-}" || { echo "::error::[TEST] JDBC_URL ausente no Environment 'test'"; exit 2; }
+          test -n "${JDBC_URL:-}" || { echo "::error::[TEST] JDBC_URL missing in Environment 'test'"; exit 2; }
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-test.properties" || { echo "::error::liquibase-test.properties ausente"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-test.properties" || { echo "::error::liquibase-test.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
           MASKED="$(echo "$JDBC_URL" | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
-          echo "JDBC_URL (mascarada): $MASKED"
-          if echo "$JDBC_URL" | grep -Eqi '\.internal|RENDER_DEFAULT_DB'; then
-            echo "::error::URL interna detectada. Use a EXTERNAL URL do Render (a mesma do DBeaver)."; exit 2
-          fi
+          echo "JDBC_URL (masked): $MASKED"
 
-      - name: Definir TAG_PRE (para rollback exato)
+      - name: Define TAG_PRE (for rollback)
         shell: bash
         run: |
           SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
@@ -175,50 +132,10 @@ jobs:
           MODE: plan
         run: bash liquibase/scripts/ci_deploy.sh TEST
 
-      - name: Artefatos (plan TEST)
+      - name: Artifacts (plan TEST)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: plan-TEST
           path: plan_TEST.sql
           if-no-files-found: ignore
-
-      # ---- Auto-merge (sem actions de terceiros) ----
-      - name: Encontrar PR aberto para main
-        if: inputs.auto_merge == 'true'
-        id: findpr
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const head  = `${owner}:${context.ref.replace('refs/heads/','')}`;
-            const { data: prs } = await github.pulls.list({ owner, repo, state: 'open', head, base: 'main' });
-            core.setOutput('number', prs.length ? prs[0].number : '');
-
-      - name: Auto-merge PR (TEST)
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && success() && inputs.mode == 'apply'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const prNum = Number('${{ steps.findpr.outputs.number }}');
-            const pr = (await github.pulls.get({ owner, repo, pull_number: prNum })).data;
-            await github.pulls.merge({ owner, repo, pull_number: prNum, merge_method: 'squash', commit_title: pr.title });
-            const branch = context.ref.replace('refs/heads/','');
-            try { await github.git.deleteRef({ owner, repo, ref: `heads/${branch}` }); }
-            catch (e) { core.warning(`Não foi possível apagar heads/${branch}: ${e.message}`); }
-
-      - name: Comentar PR (falha + rollback) (TEST)
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.number != '' && failure() && inputs.mode == 'apply'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const prNum = Number('${{ steps.findpr.outputs.number }}');
-            const body  = `❌ Deploy de **TEST** falhou para \`${process.env.GITHUB_SHA}\`.\n` +
-                          `Foi tentado **rollback até a tag \`${process.env.TAG_PRE || '(sem TAG_PRE)'}\`**.\n` +
-                          `Veja os logs e ajuste o changeset antes de tentar novamente.`;
-            await github.issues.createComment({ owner, repo, issue_number: prNum, body });
