@@ -20,6 +20,7 @@ jobs:
     env:
       LB_DIR: liquibase
       JDBC_URL: ${{ secrets.JDBC_URL }}
+      ENV_ARG: ${{ inputs.env }}
 
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +28,7 @@ jobs:
       - name: Preflight (${{ inputs.env }})
         run: |
           echo "Reset DB for ${{ inputs.env }} | SHA=$GITHUB_SHA"
-          test -x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh"
+          chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
           test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ inputs.env }}.properties" || { echo "::error::liquibase-${{ inputs.env }}.properties missing"; exit 2; }
           test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
 
@@ -36,4 +37,4 @@ jobs:
           TAG_PRE: reset-${{ inputs.env }}-${{ github.sha }}-pre
         run: |
           echo "TAG_PRE=$TAG_PRE"
-          bash liquibase/scripts/ci_deploy.sh ${{ inputs.env^^ }} --contexts=reset
+          bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}" --contexts=reset
