@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       env:
-        description: "Ambiente"
+        description: "Environment"
         required: true
         type: choice
         options: [dev, test]
       mode:
-        description: "Ação"
+        description: "Action"
         required: true
         type: choice
         options: [apply, plan-only]
         default: apply
       auto_merge:
-        description: "Auto-merge PR -> main se DB OK"
+        description: "Auto-merge PR -> main if DB OK"
         required: false
         type: boolean
         default: false
@@ -25,85 +25,114 @@ permissions:
   pull-requests: write
 
 jobs:
-  deploy:
-    name: Deploy (${{ inputs.env }} / ${{ inputs.mode }})
+  # ===================== DEV =====================
+  deploy-dev:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.env == 'dev' || github.event_name == 'push' && github.ref != 'refs/heads/main' }}
+    name: Deploy (DEV / ${{ inputs.mode || 'apply' }})
     runs-on: ubuntu-latest
-    environment: ${{ inputs.env }}
+    environment: dev
     concurrency:
-      group: feature-db-${{ inputs.env }}
+      group: feature-db-dev
       cancel-in-progress: false
     env:
       LB_DIR: liquibase
       JDBC_URL: ${{ secrets.JDBC_URL }}
 
     steps:
-      - name: Checkout (branch escolhida no Run workflow)
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Permissão ao script
-        run: chmod +x liquibase/scripts/ci_deploy.sh
+      - name: Preflight (DEV)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Branch: $GITHUB_REF_NAME  | SHA: $GITHUB_SHA"
+          test -n "${JDBC_URL:-}" || { echo "::error::[DEV] JDBC_URL missing in Environment 'dev'"; exit 2; }
+          chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-dev.properties" || { echo "::error::liquibase-dev.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
+          MASKED="$(echo "$JDBC_URL" | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
+          echo "JDBC_URL (masked): $MASKED"
 
-      - name: Definir TAG_PRE (para rollback exato)
+      - name: Define TAG_PRE (for rollback)
+        shell: bash
         run: |
           SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
           echo "TAG_PRE=feat-${SAFE_BRANCH}-${GITHUB_SHA}-pre" >> $GITHUB_ENV
           echo "TAG_PRE=$TAG_PRE"
 
-      - name: Liquibase apply
-        if: inputs.mode == 'apply'
+      - name: Liquibase apply (DEV)
+        if: inputs.mode == 'apply' || github.event_name == 'push'
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
-        run: |
-          ENV_UPPER=$(echo "${{ inputs.env }}" | tr '[:lower:]' '[:upper:]')
-          bash liquibase/scripts/ci_deploy.sh "$ENV_UPPER"
+        run: bash liquibase/scripts/ci_deploy.sh DEV
 
-      - name: Liquibase plan-only
-        if: inputs.mode == 'plan-only'
-        run: |
-          PROPS="liquibase-${{ inputs.env }}.properties"
-          docker run --rm --network host -w /workspace \
-            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
-            --defaultsFile="/workspace/conf/$PROPS" \
-            --url="$JDBC_URL" validate
-          docker run --rm --network host -w /workspace \
-            -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" liquibase/liquibase \
-            --defaultsFile="/workspace/conf/$PROPS" \
-            --url="$JDBC_URL" updateSQL | tee "plan_$(echo "${{ inputs.env }}" | tr a-z A-Z).sql"
+      - name: Liquibase plan-only (DEV)
+        if: inputs.mode == 'plan-only' && github.event_name == 'workflow_dispatch'
+        env:
+          MODE: plan
+        run: bash liquibase/scripts/ci_deploy.sh DEV
 
-      - name: Artefatos (plan)
+      - name: Artifacts (plan DEV)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: plan-${{ inputs.env }}
-          path: plan_*.sql
+          name: plan-DEV
+          path: plan_DEV.sql
           if-no-files-found: ignore
 
-      # localizar PR aberto da branch -> main
-      - name: Encontrar PR aberto para main
-        if: inputs.auto_merge == 'true'
-        id: findpr
-        uses: peter-evans/find-pull-request@v3
-        with:
-          base: main
-          branch: ${{ github.ref_name }}
+  # ===================== TEST =====================
+  deploy-test:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.env == 'test' }}
+    name: Deploy (TEST / ${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    environment: test
+    concurrency:
+      group: feature-db-test
+      cancel-in-progress: false
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ secrets.JDBC_URL }}
 
-      # se deploy OK, mergeia PR (respeita branch protection)
-      - name: Auto-merge PR
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && success() && inputs.mode == 'apply'
-        uses: peter-evans/merge@v3
-        with:
-          pull-request: ${{ steps.findpr.outputs.pull-request-number }}
-          merge-method: squash
-          commit-message: pull-request-title
-          delete-branch: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # se falhou, comenta no PR dizendo que foi feito rollback
-      - name: Comentar PR (falha + rollback)
-        if: inputs.auto_merge == 'true' && steps.findpr.outputs.pull-request-number && failure() && inputs.mode == 'apply'
-        uses: peter-evans/create-or-update-comment@v4
+      - name: Preflight (TEST)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Branch: $GITHUB_REF_NAME  | SHA: $GITHUB_SHA"
+          test -n "${JDBC_URL:-}" || { echo "::error::[TEST] JDBC_URL missing in Environment 'test'"; exit 2; }
+          chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-test.properties" || { echo "::error::liquibase-test.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
+          MASKED="$(echo "$JDBC_URL" | sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#')"
+          echo "JDBC_URL (masked): $MASKED"
+
+      - name: Define TAG_PRE (for rollback)
+        shell: bash
+        run: |
+          SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/ ' '--')
+          echo "TAG_PRE=feat-${SAFE_BRANCH}-${GITHUB_SHA}-pre" >> $GITHUB_ENV
+          echo "TAG_PRE=$TAG_PRE"
+
+      - name: Liquibase apply (TEST)
+        if: inputs.mode == 'apply'
+        env:
+          TAG_PRE: ${{ env.TAG_PRE }}
+        run: bash liquibase/scripts/ci_deploy.sh TEST
+
+      - name: Liquibase plan-only (TEST)
+        if: inputs.mode == 'plan-only'
+        env:
+          MODE: plan
+        run: bash liquibase/scripts/ci_deploy.sh TEST
+
+      - name: Artifacts (plan TEST)
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          issue-number: ${{ steps.findpr.outputs.pull-request-number }}
-          body: |
-            ❌ Deploy de **${{ inputs.env }}** falhou para `${{ github.sha }}`.
-            O workflow tentou **rollback para a tag `${{ env.TAG_PRE }}`** para manter o ambiente limpo.
-            Verifique os logs e ajuste o changeset antes de tentar novamente.
+          name: plan-TEST
+          path: plan_TEST.sql
+          if-no-files-found: ignore

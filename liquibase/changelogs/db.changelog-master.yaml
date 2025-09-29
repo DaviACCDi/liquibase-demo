@@ -1,0 +1,21 @@
+databaseChangeLog:
+  # --- Tables ---
+  - include:
+      file: tables/person.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: tables/product.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: tables/order.yaml
+      relativeToChangelogFile: true
+
+  # --- Meta (tags/audit) ---
+  - include:
+      file: util/meta.yaml
+      relativeToChangelogFile: true
+
+  # --- Reset (explicity --contexts=reset) ---
+  - include:
+      file: util/reset.yaml
+      relativeToChangelogFile: true

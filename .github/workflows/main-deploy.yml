@@ -25,18 +25,18 @@ jobs:
       - name: Preflight (DEV)
         run: |
           echo "Ref: $GITHUB_SHA | Branch: $GITHUB_REF_NAME"
-          test -n "${JDBC_URL:-}" || { echo "::error::[DEV] JDBC_URL não definido no Environment 'dev'"; exit 2; }
+          test -n "${JDBC_URL:-}" || { echo "::error::[DEV] JDBC_URL not defined in Environment 'dev'"; exit 2; }
           test -x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh"
           ls -la "$GITHUB_WORKSPACE/$LB_DIR" || true
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-dev.properties" || { echo "::error::liquibase-dev.properties ausente"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-dev.properties" || { echo "::error::liquibase-dev.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
 
-      - name: Deploy DEV (com TAG_PRE)
+      - name: Deploy DEV (with TAG_PRE)
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
         run: bash liquibase/scripts/ci_deploy.sh DEV
 
-      - name: Artefato (plan DEV)
+      - name: Artifact (plan DEV)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -64,17 +64,17 @@ jobs:
 
       - name: Preflight (TEST)
         run: |
-          test -n "${JDBC_URL:-}" || { echo "::error::[TEST] JDBC_URL não definido no Environment 'test'"; exit 2; }
+          test -n "${JDBC_URL:-}" || { echo "::error::[TEST] JDBC_URL not defined in Environment 'test'"; exit 2; }
           test -x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh"
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-test.properties" || { echo "::error::liquibase-test.properties ausente"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-test.properties" || { echo "::error::liquibase-test.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
 
-      - name: Deploy TEST (com TAG_PRE)
+      - name: Deploy TEST (with TAG_PRE)
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
         run: bash liquibase/scripts/ci_deploy.sh TEST
 
-      - name: Artefato (plan TEST)
+      - name: Artifact (plan TEST)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -86,7 +86,7 @@ jobs:
     name: PROD Deploy
     runs-on: ubuntu-latest
     needs: [test-deploy]
-    environment: prod   # mantenha reviewers no Environment 'prod'
+    environment: prod   # keep reviewers on Environment 'prod'
     concurrency:
       group: db-prod
       cancel-in-progress: false
@@ -102,18 +102,18 @@ jobs:
 
       - name: Preflight (PROD)
         run: |
-          test -n "${JDBC_URL:-}" || { echo "::error::[PROD] JDBC_URL não definido no Environment 'prod'"; exit 2; }
+          test -n "${JDBC_URL:-}" || { echo "::error::[PROD] JDBC_URL not defined in Environment 'prod'"; exit 2; }
           test -x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh"
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-prod.properties" || { echo "::error::liquibase-prod.properties ausente"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.xml" || { echo "::error::master changelog ausente"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-prod.properties" || { echo "::error::liquibase-prod.properties missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
 
-      - name: Deploy PROD (com TAG_PRE)
+      - name: Deploy PROD (with TAG_PRE)
         id: prod_run
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
         run: bash liquibase/scripts/ci_deploy.sh PROD
 
-      - name: Artefato (plan PROD)
+      - name: Artifact (plan PROD)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -122,7 +122,7 @@ jobs:
           if-no-files-found: ignore
 
   rollback-test-if-prod-failed:
-    name: Alinhar TEST (rollbackToTag) se PROD falhar
+    name: Rollback TEST to TAG_PRE if PROD failed
     runs-on: ubuntu-latest
     needs: [prod-deploy]
     if: needs.prod-deploy.result == 'failure'
@@ -136,7 +136,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Rollback TEST até a TAG_PRE
+      - name: Rollback TEST to TAG_PRE
         run: |
           docker run --rm --network host -w /workspace \
             -v "$GITHUB_WORKSPACE/$LB_DIR:/workspace" \

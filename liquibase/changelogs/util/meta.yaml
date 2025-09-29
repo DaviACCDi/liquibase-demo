@@ -1,0 +1,64 @@
+databaseChangeLog:
+  # One-time audit table
+  - changeSet:
+      id: audit-000-create-table
+      author: ${deployer}
+      labels: "topic:audit,ref:${gitRef},sha:${gitSha}"
+      context: ddl
+      comment: "Create audit table for Liquibase runs"
+      changes:
+        - createTable:
+            tableName: lb_audit
+            columns:
+              - column: { name: id, type: int generated always as identity, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: env, type: varchar(16) }
+              - column: { name: deploy_kind, type: varchar(64) }
+              - column: { name: git_ref, type: varchar(128) }
+              - column: { name: git_sha, type: varchar(64) }
+              - column: { name: tag, type: varchar(200) }
+              - column: { name: stage, type: varchar(16) }   # PRE | POST
+              - column: { name: executed_at, type: timestamp, defaultValueComputed: CURRENT_TIMESTAMP }
+
+  # PRE: tagDatabase + audit
+  - changeSet:
+      id: tag-pre-${TAG_PRE}
+      author: ${deployer}
+      labels: "topic:meta,stage:pre,ref:${gitRef},sha:${gitSha}"
+      context: tag_pre
+      comment: "Tag PRE ${TAG_PRE}"
+      changes:
+        - tagDatabase: { tag: "${TAG_PRE}" }
+
+  - changeSet:
+      id: audit-pre-${TAG_PRE}
+      author: ${deployer}
+      labels: "topic:audit,stage:pre,ref:${gitRef},sha:${gitSha}"
+      context: audit_pre
+      comment: "Audit PRE tag ${TAG_PRE}"
+      changes:
+        - sql:
+            sql: >
+              INSERT INTO lb_audit(env, deploy_kind, git_ref, git_sha, tag, stage)
+              VALUES ('${ENV}', '${deployKind}', '${gitRef}', '${gitSha}', '${TAG_PRE}', 'PRE');
+
+  # POST: tagDatabase + audit
+  - changeSet:
+      id: tag-post-${TAG_POST}
+      author: ${deployer}
+      labels: "topic:meta,stage:post,ref:${gitRef},sha:${gitSha}"
+      context: tag_post
+      comment: "Tag POST ${TAG_POST}"
+      changes:
+        - tagDatabase: { tag: "${TAG_POST}" }
+
+  - changeSet:
+      id: audit-post-${TAG_POST}
+      author: ${deployer}
+      labels: "topic:audit,stage:post,ref:${gitRef},sha:${gitSha}"
+      context: audit_post
+      comment: "Audit POST tag ${TAG_POST}"
+      changes:
+        - sql:
+            sql: >
+              INSERT INTO lb_audit(env, deploy_kind, git_ref, git_sha, tag, stage)
+              VALUES ('${ENV}', '${deployKind}', '${gitRef}', '${gitSha}', '${TAG_POST}', 'POST');
