@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   reset-db:
-    name: Reset ${{ inputs.env }} (${{ inputs.mode }})
+    name: Reset ${{ inputs.env }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
     concurrency:
