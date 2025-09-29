@@ -16,7 +16,7 @@ on:
         options: [apply, plan-only]
         default: plan-only
       confirm:
-        description: 'Type RESET to confirm (this DROPs and recreates)'
+        description: "Type RESET to confirm"
         required: true
         type: string
         default: ""
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   reset-db:
-    name: Reset ${{ inputs.env }}
+    name: Reset ${{ inputs.env }} (${{ inputs.mode }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.env }}
     concurrency:
@@ -36,33 +36,24 @@ jobs:
       LB_DIR: liquibase
       JDBC_URL: ${{ secrets.JDBC_URL }}
       ENV_ARG: ${{ inputs.env }}
-      # Ensure only reset changesets run
       LIQUIBASE_CONTEXTS: reset
-      # Tell our script to do plan-only or apply
       MODE: ${{ inputs.mode == 'plan-only' && 'plan' || 'apply' }}
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Preflight (${{ inputs.env }})
+      - name: Preflight
         shell: bash
         run: |
           set -euo pipefail
           test "${{ inputs.confirm }}" = "RESET" || { echo "::error::Type RESET to proceed"; exit 2; }
-          echo "Reset DB for ${{ inputs.env }} | SHA=$GITHUB_SHA"
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ inputs.env }}.properties" || { echo "::error::liquibase-${{ inputs.env }}.properties missing"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master changelog missing"; exit 2; }
-
-      - name: Run Liquibase Reset (${{ inputs.env }})
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ inputs.env }}.properties" || { echo "::error::props missing"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master missing"; exit 2; }
+      - name: Run reset
         env:
           TAG_PRE: reset-${{ inputs.env }}-${{ github.sha }}-pre
-        run: |
-          echo "TAG_PRE=$TAG_PRE"
-          # MODE and LIQUIBASE_CONTEXTS are picked up by ci_deploy.sh / Liquibase
-          bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}"
-
-      - name: Upload plan artifact
+        run: bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}"
+      - name: Upload plan
         if: always()
         uses: actions/upload-artifact@v4
         with:
