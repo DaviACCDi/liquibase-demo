@@ -82,7 +82,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ inputs.confirm }}" = "RESET" || { echo "::error::Digite RESET para prosseguir"; exit 2; }
+          # Agora confirm é boolean: true/false
+          if [[ "${{ inputs.confirm }}" != "true" ]]; then
+            echo "::error::Marque a caixa de confirmação para prosseguir"
+            exit 2
+          fi
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
           test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ matrix.env }}.properties" \
             || { echo "::error::liquibase-${{ matrix.env }}.properties ausente"; exit 2; }
