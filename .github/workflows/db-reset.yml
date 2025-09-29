@@ -1,62 +1,95 @@
 name: DB Reset
-run-name: "DB Reset – ${{ inputs.env || 'manual' }}"
+run-name: "DB Reset – ${{ inputs.envs || 'manual' }}"
 
 on:
   workflow_dispatch:
     inputs:
-      env:
-        description: "Environment to reset"
-        required: true
-        type: choice
-        options: [dev, test]
-      mode:
-        description: "Action"
-        required: true
-        type: choice
-        options: [apply, plan-only]
-        default: plan-only
-      confirm:
-        description: "Type RESET to confirm"
+      envs:
+        description: "Ambientes (dev,test,prod ou ALL)"
         required: true
         type: string
-        default: ""
+        default: "dev"
+      confirm:
+        description: "Confirmo que desejo RESETAR os bancos selecionados"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  reset-db:
-    name: Reset ${{ inputs.env }} (${{ inputs.mode }})
+  prepare:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.env }}
-    concurrency:
-      group: db-${{ inputs.env }}-reset
-      cancel-in-progress: false
-    env:
-      LB_DIR: liquibase
-      JDBC_URL: ${{ secrets.JDBC_URL }}
-      ENV_ARG: ${{ inputs.env }}
-      LIQUIBASE_CONTEXTS: reset
-      MODE: ${{ inputs.mode == 'plan-only' && 'plan' || 'apply' }}
-
+    outputs:
+      env_matrix: ${{ steps.mk.outputs.env_matrix }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Preflight
+      - id: mk
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ inputs.confirm }}" = "RESET" || { echo "::error::Type RESET to proceed"; exit 2; }
+          IN="${{ inputs.envs }}"
+          IN_UP=$(echo "$IN" | tr '[:lower:]' '[:upper:]' | tr -d ' ')
+          if [[ "$IN_UP" == "ALL" ]]; then
+            ARR='["dev","test","prod"]'
+          else
+            MAP=$(echo "$IN_UP" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed '/^$/d')
+            for e in $MAP; do
+              [[ "$e" =~ ^(dev|test|prod)$ ]] || { echo "::error::Ambiente inválido: $e"; exit 2; }
+            done
+            ARR=$(printf '[%s]\n' "$(echo "$MAP" | sed 's/^/"/; s/$/"/' | paste -sd, -)")
+          fi
+          echo "env_matrix=$ARR" >> "$GITHUB_OUTPUT"
+
+  reset-db:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.prepare.outputs.env_matrix) }}
+    name: "Reset ${{ matrix.env }}"
+    environment: ${{ matrix.env }}
+    concurrency:
+      group: db-${{ matrix.env }}-reset
+      cancel-in-progress: false
+    env:
+      LB_DIR: liquibase
+      JDBC_URL: ${{ matrix.env == 'dev'  && (secrets.JDBC_URL_DEV  || secrets.JDBC_URL) ||
+                   matrix.env == 'test' && (secrets.JDBC_URL_TEST || secrets.JDBC_URL) ||
+                                          (secrets.JDBC_URL_PROD || secrets.JDBC_URL) }}
+      ENV_ARG: ${{ matrix.env }}
+      MODE: apply
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight (${{ matrix.env }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.confirm }}" == 'true' ]] || { echo "::error::Marque a confirmação para prosseguir"; exit 2; }
           chmod +x "$GITHUB_WORKSPACE/$LB_DIR/scripts/ci_deploy.sh" || true
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ inputs.env }}.properties" || { echo "::error::props missing"; exit 2; }
-          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" || { echo "::error::master missing"; exit 2; }
-      - name: Run reset
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/conf/liquibase-${{ matrix.env }}.properties" \
+            || { echo "::error::liquibase-${{ matrix.env }}.properties ausente"; exit 2; }
+          test -f "$GITHUB_WORKSPACE/$LB_DIR/changelogs/db.changelog-master.yaml" \
+            || { echo "::error::master changelog ausente"; exit 2; }
+
+      - name: Run Liquibase Reset (${{ matrix.env }})
         env:
-          TAG_PRE: reset-${{ inputs.env }}-${{ github.sha }}-pre
-        run: bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}"
-      - name: Upload plan
+          TAG_PRE: reset-${{ matrix.env }}-${{ github.sha }}-pre
+        run: |
+          # Executa apenas o contexto 'reset'
+          bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}" --contexts=reset
+
+      # Opcional: anexar o plan (útil pra auditoria)
+      - name: Upload plan (${{ matrix.env }})
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: plan-${{ inputs.env == 'dev' && 'DEV' || 'TEST' }}
-          path: plan_${{ inputs.env == 'dev' && 'DEV' || 'TEST' }}.sql
+          name: plan-${{ matrix.env }}
+          path: |
+            plan_DEV.sql
+            plan_TEST.sql
+            plan_PROD.sql
           if-no-files-found: ignore
