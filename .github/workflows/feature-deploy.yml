@@ -1,9 +1,6 @@
 name: Feature Deploy
 
 on:
-  push:
-    branches-ignore:
-      - main   # do not run automatically on main (handled by main-deploy.yml)
   workflow_dispatch:
     inputs:
       env:
