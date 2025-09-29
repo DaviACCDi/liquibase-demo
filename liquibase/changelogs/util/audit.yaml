@@ -1,22 +1,147 @@
+# changelogs/util/audit.yaml
 databaseChangeLog:
+  # Cria a tabela se (e somente se) ela ainda não existir
   - changeSet:
       id: audit-001-create-table
       author: system
       context: meta
+      preConditions:
+        onFail: MARK_RAN
+        onError: HALT
+        nestedPreconditions: AND
+        preConditions:
+          - not:
+              tableExists:
+                tableName: lb_audit
       changes:
         - createTable:
             tableName: lb_audit
             columns:
-              - column:
-                  name: id
-                  type: BIGSERIAL
-                  autoIncrement: true
-                  constraints:
-                    primaryKey: true
-              - column: { name: event,   type: varchar(50) }
-              - column: { name: env,     type: varchar(10) }
-              - column: { name: sha,     type: varchar(64) }
-              - column: { name: branch,  type: varchar(128) }
-              - column: { name: actor,   type: varchar(64) }
-              - column: { name: kind,    type: varchar(64) }
-              - column: { name: created_at, type: timestamp, defaultValueComputed: CURRENT_TIMESTAMP }
+              - column: { name: id,         type: BIGINT, autoIncrement: true, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: event,      type: VARCHAR(50) }
+              - column: { name: env,        type: VARCHAR(10) }
+              - column: { name: sha,        type: VARCHAR(64) }
+              - column: { name: branch,     type: VARCHAR(128) }
+              - column: { name: actor,      type: VARCHAR(64) }
+              - column: { name: kind,       type: VARCHAR(64) }
+              - column: { name: created_at, type: TIMESTAMP WITHOUT TIME ZONE, defaultValueComputed: NOW() }
+
+  # Garante colunas (caso a tabela tenha sido criada diferente no passado)
+  - changeSet:
+      id: audit-002-ensure-col-event
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: event
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: event, type: VARCHAR(50) }
+
+  - changeSet:
+      id: audit-003-ensure-col-env
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: env
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: env, type: VARCHAR(10) }
+
+  - changeSet:
+      id: audit-004-ensure-col-sha
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: sha
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: sha, type: VARCHAR(64) }
+
+  - changeSet:
+      id: audit-005-ensure-col-branch
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: branch
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: branch, type: VARCHAR(128) }
+
+  - changeSet:
+      id: audit-006-ensure-col-actor
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: actor
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: actor, type: VARCHAR(64) }
+
+  - changeSet:
+      id: audit-007-ensure-col-kind
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: kind
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: kind, type: VARCHAR(64) }
+
+  - changeSet:
+      id: audit-008-ensure-col-created-at
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        preConditions:
+          - not:
+              columnExists:
+                tableName: lb_audit
+                columnName: created_at
+      changes:
+        - addColumn:
+            tableName: lb_audit
+            columns:
+              - column: { name: created_at, type: TIMESTAMP WITHOUT TIME ZONE, defaultValueComputed: NOW() }
