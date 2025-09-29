@@ -3,8 +3,6 @@ databaseChangeLog:
   - include: { file: changelogs/tables/person.yaml }
   - include: { file: changelogs/tables/product.yaml }
   - include: { file: changelogs/tables/order.yaml }
-  - include: { file: changelogs/util/audit.yaml }
-  - include: { file: changelogs/util/reset.yaml }
 
   # Auditoria (apenas cria tabela; inserts são feitos pelo script bash)
   - include: { file: changelogs/util/audit.yaml }
