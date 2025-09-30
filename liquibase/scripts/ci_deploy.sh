@@ -53,14 +53,19 @@ parse_pg_url() {
     for kv in "${parts[@]}"; do
       [[ -z "$kv" ]] && continue
       case "$kv" in
-        user=*|password=*) ;;
+        user=*|password=*) ;;                 # remove cred params
         sslmode=*) have_ssl="1"; out_q="${out_q:+$out_q&}$kv" ;;
         *) out_q="${out_q:+$out_q&}$kv" ;;
       esac
     done
   fi
   [[ "$have_ssl" == "0" ]] && out_q="${out_q:+$out_q&}sslmode=require"
-  JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${out_q}"
+
+  if [[ -n "$out_q" ]]; then
+    JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?${out_q}"
+  else
+    JDBC_URL_NOAUTH="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}"
+  fi
 }
 
 tcp_probe() {
@@ -176,7 +181,7 @@ promote() {
   tcp_probe
   ensure_schemas
 
-  # Se for reset
+  # Se for reset (apenas contexto reset)
   if [[ " ${EXTRA_ARGS[*]} " == *"--contexts=reset"* ]]; then
     echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME…"
     local PLAN_FILE="plan_${ENV_NAME}.sql"
