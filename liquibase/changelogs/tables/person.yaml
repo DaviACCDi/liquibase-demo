@@ -9,7 +9,7 @@ databaseChangeLog:
       changes:
         - createTable:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             columns:
               - column:
                   name: id
@@ -33,7 +33,7 @@ databaseChangeLog:
       changes:
         - addColumn:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             columns:
               - column:
                   name: age
@@ -49,19 +49,19 @@ databaseChangeLog:
       changes:
         - addColumn:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             columns:
               - column:
                   name: email
                   type: varchar(255)
         - addUniqueConstraint:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             columnNames: email
             constraintName: uq_person_email
         - createIndex:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             indexName: idx_person_email
             columns:
               - column:
@@ -77,7 +77,7 @@ databaseChangeLog:
       changes:
         - addColumn:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             columns:
               - column:
                   name: country
@@ -85,6 +85,6 @@ databaseChangeLog:
                   defaultValue: "Unknown"
         - addNotNullConstraint:
             tableName: person
-            schemaName: lb_app
+            schemaName: app_core
             columnName: country
             columnDataType: varchar(100)
