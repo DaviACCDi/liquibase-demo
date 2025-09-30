@@ -13,5 +13,5 @@ databaseChangeLog:
   # DML
   - includeAll: { path: dml/refdata,     relativeToChangelogFile: true }
   - includeAll: { path: dml/seed,        relativeToChangelogFile: true }
-  - includeAll: { path: dml/fixes,       relativeToChangelogFile: true }
+#  - includeAll: { path: dml/fixes,       relativeToChangelogFile: true }
   - includeAll: { path: dml/testdata,    relativeToChangelogFile: true }
