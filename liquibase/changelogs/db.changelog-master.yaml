@@ -1,19 +1,17 @@
 databaseChangeLog:
-# DDL (ordem macro)
-- includeAll: { path: changelogs/ddl/tables, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/ddl/constraints, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/ddl/indexes, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/ddl/views, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/ddl/functions, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/ddl/triggers, relativeToChangelogFile: true }
+  # DDL
+  - includeAll: { path: changelogs/ddl/tables,      relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/ddl/constraints, relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/ddl/indexes,     relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/ddl/views,       relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/ddl/functions,   relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/ddl/triggers,    relativeToChangelogFile: true }
 
+  # Util
+  - includeAll: { path: changelogs/util,            relativeToChangelogFile: true }
 
-# Util (audit/grants…)
-- includeAll: { path: changelogs/util, relativeToChangelogFile: true }
-
-
-# DML por último (contexts controlam onde roda)
-- includeAll: { path: changelogs/dml/refdata, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/dml/seed, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/dml/fixes, relativeToChangelogFile: true }
-- includeAll: { path: changelogs/dml/testdata, relativeToChangelogFile: true }
+  # DML
+  - includeAll: { path: changelogs/dml/refdata,     relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/dml/seed,        relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/dml/fixes,       relativeToChangelogFile: true }
+  - includeAll: { path: changelogs/dml/testdata,    relativeToChangelogFile: true }
