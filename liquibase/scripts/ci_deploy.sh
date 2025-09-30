@@ -162,6 +162,17 @@ promote() {
 
   tcp_probe
 
+ensure_schemas() {
+  echo "[init] ensuring schemas exist…"
+  docker run --rm --network host -e PGPASSWORD="$DB_PASS" postgres:15 \
+    psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
+    -v ON_ERROR_STOP=1 -c "
+      CREATE SCHEMA IF NOT EXISTS lb_meta;
+      CREATE SCHEMA IF NOT EXISTS app_core;
+      CREATE SCHEMA IF NOT EXISTS app_ref;
+    "
+} 
+
   # Se for reset
   if [[ " ${EXTRA_ARGS[*]} " == *"--contexts=reset"* ]]; then
     echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME…"
