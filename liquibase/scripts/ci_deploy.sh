@@ -130,7 +130,6 @@ ensure_schemas() {
     -v ON_ERROR_STOP=1 -c "
       CREATE SCHEMA IF NOT EXISTS lb_meta;
       CREATE SCHEMA IF NOT EXISTS app_core;
-      CREATE SCHEMA IF NOT EXISTS app_ref;
     "
 }
 
