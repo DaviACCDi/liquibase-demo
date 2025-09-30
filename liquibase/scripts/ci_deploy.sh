@@ -69,6 +69,7 @@ tcp_probe() {
     && echo "[tcp] OK" || { echo "::error::[tcp] Cannot open TCP connection to ${DB_HOST}:${DB_PORT}"; exit 3; }
 }
 
+# Classifica o plano para auditoria/labels
 classify_plan() {
   local f="$1"
   local U; U="$(tr '[:lower:]' '[:upper:]' < "$f" 2>/dev/null || true)"
@@ -82,7 +83,7 @@ classify_plan() {
   fi
 }
 
-
+# Executa Liquibase
 run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
@@ -96,7 +97,6 @@ run_liquibase() {
     --password="$DB_PASS" \
     "$@" "${EXTRA_ARGS[@]}"
 }
-
 
 log_ctx() {
   echo "### Context"
@@ -117,14 +117,27 @@ env_props() {
   esac
 }
 
-# Função para auditar
+# Cria schemas necessários (antes do Liquibase tentar criar suas tabelas)
+ensure_schemas() {
+  echo "[init] ensuring schemas exist…"
+  docker run --rm --network host -e PGPASSWORD="$DB_PASS" postgres:15 \
+    psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
+    -v ON_ERROR_STOP=1 -c "
+      CREATE SCHEMA IF NOT EXISTS lb_meta;
+      CREATE SCHEMA IF NOT EXISTS app_core;
+      CREATE SCHEMA IF NOT EXISTS app_ref;
+    "
+}
+
+# Auditoria (env + evento)
 log_audit() {
-  local EVENT="$1"
+  local ENV_NAME="$1"
+  local EVENT="$2"
   local KIND="${DEPLOY_KIND:-unknown}"
   local SHA="${GITHUB_SHA:-unknown}"
   local BRANCH="${GITHUB_REF_NAME:-unknown}"
 
-  echo "[AUDIT] $ENV_NAME $EVENT ($KIND) sha=$SHA branch=$BRANCH actor=$DEPLOYER"
+  echo "[AUDIT] ${ENV_NAME} ${EVENT} (${KIND}) sha=${SHA} branch=${BRANCH} actor=${DEPLOYER}"
 
   docker run --rm --network host \
     -e PGPASSWORD="$DB_PASS" postgres:15 \
@@ -161,17 +174,7 @@ promote() {
   echo
 
   tcp_probe
-
-ensure_schemas() {
-  echo "[init] ensuring schemas exist…"
-  docker run --rm --network host -e PGPASSWORD="$DB_PASS" postgres:15 \
-    psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
-    -v ON_ERROR_STOP=1 -c "
-      CREATE SCHEMA IF NOT EXISTS lb_meta;
-      CREATE SCHEMA IF NOT EXISTS app_core;
-      CREATE SCHEMA IF NOT EXISTS app_ref;
-    "
-} 
+  ensure_schemas
 
   # Se for reset
   if [[ " ${EXTRA_ARGS[*]} " == *"--contexts=reset"* ]]; then
@@ -210,18 +213,18 @@ ensure_schemas() {
   local TAG_POST="${TAG_PRE%-pre}-post-${DEPLOY_KIND//[^a-zA-Z0-9:_-]/_}"
 
   run_liquibase "$PROPS" tag "$TAG_PRE" || true
-  log_audit "pre"
+  log_audit "$ENV_NAME" "pre"
 
   echo "===== [$ENV_NAME] UPDATE ====="
   if ! run_liquibase "$PROPS" update; then
     echo "!!! Failed in $ENV_NAME → rollback"
     run_liquibase "$PROPS" rollback --tag "$TAG_PRE" || true
-    log_audit "rollback"
+    log_audit "$ENV_NAME" "rollback"
     exit 1
   fi
 
   run_liquibase "$PROPS" tag "$TAG_POST" || true
-  log_audit "post"
+  log_audit "$ENV_NAME" "post"
 
   echo "===== [$ENV_NAME] HISTORY ====="
   run_liquibase "$PROPS" history || true
