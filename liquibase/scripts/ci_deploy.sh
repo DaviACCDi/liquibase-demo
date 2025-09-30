@@ -93,8 +93,9 @@ run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
   docker run --rm --network host -w /workspace \
-    -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
-    -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
++    -e LIQUIBASE_INSTALL=postgresql \
+     -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
+     -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --log-level=info \
     --url="$JDBC_URL_NOAUTH" \
