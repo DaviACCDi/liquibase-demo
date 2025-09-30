@@ -1,11 +1,19 @@
-# liquibase/changelogs/db.changelog-master.yaml
 databaseChangeLog:
-  - include: { file: changelogs/tables/person.yaml }
-  - include: { file: changelogs/tables/product.yaml }
-  - include: { file: changelogs/tables/order.yaml }
+# DDL (ordem macro)
+- includeAll: { path: changelogs/ddl/tables, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/ddl/constraints, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/ddl/indexes, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/ddl/views, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/ddl/functions, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/ddl/triggers, relativeToChangelogFile: true }
 
-  # Auditoria (apenas cria tabela; inserts são feitos pelo script bash)
-  - include: { file: changelogs/util/audit.yaml }
 
-  # Reset (context=reset)
-  #- include: { file: changelogs/util/reset.yaml }
+# Util (audit/grants…)
+- includeAll: { path: changelogs/util, relativeToChangelogFile: true }
+
+
+# DML por último (contexts controlam onde roda)
+- includeAll: { path: changelogs/dml/refdata, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/dml/seed, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/dml/fixes, relativeToChangelogFile: true }
+- includeAll: { path: changelogs/dml/testdata, relativeToChangelogFile: true }

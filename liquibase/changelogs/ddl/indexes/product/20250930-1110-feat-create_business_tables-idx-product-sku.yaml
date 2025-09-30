@@ -1,0 +1,19 @@
+databaseChangeLog:
+- changeSet:
+id: 20250930-1110-feat-create_business_tables-idx-product-sku
+author: ${deployer}
+comment: "Criar UNIQUE em product.sku"
+preConditions:
+onFail: MARK_RAN
+not:
+indexExists: { indexName: uq_product_sku, schemaName: app_core, tableName: product }
+changes:
+- createIndex:
+schemaName: app_core
+tableName: product
+indexName: uq_product_sku
+unique: true
+columns:
+- column: { name: sku }
+rollback:
+- dropIndex: { schemaName: app_core, tableName: product, indexName: uq_product_sku }
