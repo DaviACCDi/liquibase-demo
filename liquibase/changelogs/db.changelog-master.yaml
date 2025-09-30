@@ -3,9 +3,9 @@ databaseChangeLog:
   - includeAll: { path: ddl/tables,      relativeToChangelogFile: true }
   - includeAll: { path: ddl/constraints, relativeToChangelogFile: true }
   - includeAll: { path: ddl/indexes,     relativeToChangelogFile: true }
-  - includeAll: { path: ddl/views,       relativeToChangelogFile: true }
-  - includeAll: { path: ddl/functions,   relativeToChangelogFile: true }
-  - includeAll: { path: ddl/triggers,    relativeToChangelogFile: true }
+#  - includeAll: { path: ddl/views,       relativeToChangelogFile: true }
+#  - includeAll: { path: ddl/functions,   relativeToChangelogFile: true }
+#  - includeAll: { path: ddl/triggers,    relativeToChangelogFile: true }
 
   # Util
   - includeAll: { path: util,            relativeToChangelogFile: true }
