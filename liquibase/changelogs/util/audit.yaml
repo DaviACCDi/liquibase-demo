@@ -1,7 +1,7 @@
 # liquibase/changelogs/util/audit.yaml
 databaseChangeLog:
 
-  # 000) Cria o schema lb_meta apenas se NÃO existir (compatível com OSS)
+  # 000) Garante o schema lb_meta (compatível 100% com OSS usando SQL)
   - changeSet:
       id: audit-000-create-schema
       author: system
@@ -13,8 +13,7 @@ databaseChangeLog:
           expectedResult: "0"
           sql: "SELECT COUNT(*) FROM pg_namespace WHERE nspname = 'lb_meta'"
       changes:
-        - createSchema:
-            schemaName: lb_meta
+        - sql: "CREATE SCHEMA IF NOT EXISTS lb_meta"
 
   # 001) Cria a tabela somente se NÃO existir
   - changeSet:
@@ -51,7 +50,7 @@ databaseChangeLog:
                   type: TIMESTAMP WITHOUT TIME ZONE
                   defaultValueComputed: NOW()
 
-  # 002+) Ensure das colunas (roda só se faltar)
+  # 002) Ensure colunas (só se faltarem)
   - changeSet:
       id: audit-002-ensure-col-event
       author: system
