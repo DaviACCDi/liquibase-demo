@@ -1,14 +1,15 @@
 databaseChangeLog:
   - changeSet:
-      id: reset-001-drop-core
-      author: ${actor:DaviACCDi}
+      id: reset-001-drop-and-recreate-app-core
+      author: ${deployer}
       context: reset
+      comment: "DROP & CREATE schema app_core (uso controlado, apenas com --contexts=reset)"
       changes:
         - sql: |
             DO $$
             BEGIN
-              IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'core') THEN
-                EXECUTE 'DROP SCHEMA core CASCADE';
+              IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'app_core') THEN
+                EXECUTE 'DROP SCHEMA app_core CASCADE';
               END IF;
-              EXECUTE 'CREATE SCHEMA core';
+              EXECUTE 'CREATE SCHEMA app_core';
             END$$;

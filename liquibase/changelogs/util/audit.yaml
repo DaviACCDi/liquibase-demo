@@ -1,66 +1,86 @@
 databaseChangeLog:
+  # 000) Garante o schema lb_meta (compatível com OSS usando SQL puro)
+  - changeSet:
+      id: audit-000-create-schema
+      author: ${deployer}
+      context: meta
+      comment: "Cria o schema lb_meta se não existir"
+      preConditions:
+        onFail: MARK_RAN
+        onError: HALT
+        not:
+          schemaExists:
+            schemaName: lb_meta
+      changes:
+        - sql: "CREATE SCHEMA IF NOT EXISTS lb_meta"
 
+  # 001) Cria a tabela lb_meta.lb_audit se não existir
+  - changeSet:
+      id: audit-001-create-table
+      author: ${deployer}
+      context: meta
+      comment: "Cria tabela de auditoria lb_meta.lb_audit"
+      preConditions:
+        onFail: MARK_RAN
+        onError: HALT
+        not:
+          tableExists:
+            schemaName: lb_meta
+            tableName: lb_audit
+      changes:
+        - createTable:
+            schemaName: lb_meta
+            tableName: lb_audit
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: event
+                  type: VARCHAR(50)
+              - column:
+                  name: env
+                  type: VARCHAR(10)
+              - column:
+                  name: sha
+                  type: VARCHAR(64)
+              - column:
+                  name: branch
+                  type: VARCHAR(128)
+              - column:
+                  name: actor
+                  type: VARCHAR(64)
+              - column:
+                  name: kind
+                  type: VARCHAR(64)
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITHOUT TIME ZONE
+                  defaultValueComputed: NOW()
 
-# 000) Garante o schema lb_meta (compatível 100% com OSS usando SQL)
-- changeSet:
-id: audit-000-create-schema
-author: ${deployer}
-context: meta
-comment: "Garantir schema lb_meta para objetos de auditoria/sistema"
-preConditions:
-onFail: MARK_RAN
-onError: HALT
-sqlCheck:
-expectedResult: "0"
-sql: "SELECT COUNT(*) FROM pg_namespace WHERE nspname = 'lb_meta'"
-changes:
-- sql: "CREATE SCHEMA IF NOT EXISTS lb_meta"
-
-
-# 001) Cria a tabela somente se NÃO existir
-- changeSet:
-id: audit-001-create-table
-author: ${deployer}
-context: meta
-comment: "Criar tabela lb_meta.lb_audit para rastrear execuções/deploys"
-preConditions:
-onFail: MARK_RAN
-onError: HALT
-not:
-tableExists:
-schemaName: lb_meta
-tableName: lb_audit
-changes:
-- createTable:
-schemaName: lb_meta
-tableName: lb_audit
-remarks: "Auditoria de execuções Liquibase"
-columns:
-- column:
-name: id
-type: BIGINT
-autoIncrement: true
-constraints:
-primaryKey: true
-nullable: false
-- column: { name: event, type: VARCHAR(50) }
-- column: { name: env, type: VARCHAR(32) }
-- column: { name: sha, type: VARCHAR(64) }
-- column: { name: branch, type: VARCHAR(128) }
-- column: { name: actor, type: VARCHAR(128) }
-- column: { name: kind, type: VARCHAR(64) }
-- column:
-name: created_at
-type: TIMESTAMP WITHOUT TIME ZONE
-defaultValueComputed: NOW()
-rollback:
-- dropTable: { schemaName: lb_meta, tableName: lb_audit }
-
-
-# 002..008) Ensure colunas (só se faltarem)
-- changeSet:
-id: audit-002-ensure-col-event
-author: ${deployer}
-context: meta
-comment: "Garantir coluna event em lb_meta.lb_audit"
-defaultValueComputed: NOW()
+  # 002) Exemplo de "ensure column" idempotente (só adiciona se faltou)
+  - changeSet:
+      id: audit-002-ensure-col-env
+      author: ${deployer}
+      context: meta
+      comment: "Garante coluna env (caso tenha sido criada sem ela em bancos antigos)"
+      preConditions:
+        onFail: MARK_RAN
+        onError: HALT
+        not:
+          columnExists:
+            schemaName: lb_meta
+            tableName: lb_audit
+            columnName: env
+      changes:
+        - addColumn:
+            schemaName: lb_meta
+            tableName: lb_audit
+            columns:
+              - column:
+                  name: env
+                  type: VARCHAR(10)
