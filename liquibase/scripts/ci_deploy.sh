@@ -125,10 +125,10 @@ run_liquibase() {
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
     "$LIQUIBASE_IMAGE" \
-    sh -lc '
-      set -euo pipefail
+    sh -euc '
       for ext in '"$LIQUIBASE_EXTENSIONS"'; do
         echo "[lb] install extension: $ext"
+        # não falha se já estiver instalado
         liquibase --no-prompt --log-level=info install "$ext" || true
       done
       echo "[lb] extensions installed."
@@ -149,6 +149,7 @@ run_liquibase() {
       --password="${DB_PASS}" \
       "$@" "${EXTRA_ARGS[@]}"
 }
+
 
 log_ctx() {
   echo "### Context"
