@@ -1,6 +1,22 @@
-# changelogs/util/audit.yaml
+# liquibase/changelogs/util/audit.yaml
 databaseChangeLog:
-  # Cria a tabela só se NÃO existir
+
+  # 0) Garante o schema de metadados
+  - changeSet:
+      id: audit-000-create-schema
+      author: system
+      context: meta
+      preConditions:
+        onFail: MARK_RAN
+        onError: HALT
+        not:
+          schemaExists:
+            schemaName: lb_meta
+      changes:
+        - createSchema:
+            schemaName: lb_meta
+
+  # 1) Cria a tabela somente se NÃO existir
   - changeSet:
       id: audit-001-create-table
       author: system
@@ -10,21 +26,32 @@ databaseChangeLog:
         onError: HALT
         not:
           tableExists:
+            schemaName: lb_meta
             tableName: lb_audit
       changes:
         - createTable:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
-              - column: { name: id,         type: BIGINT, autoIncrement: true, constraints: { primaryKey: true, nullable: false } }
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
               - column: { name: event,      type: VARCHAR(50) }
               - column: { name: env,        type: VARCHAR(10) }
               - column: { name: sha,        type: VARCHAR(64) }
               - column: { name: branch,     type: VARCHAR(128) }
               - column: { name: actor,      type: VARCHAR(64) }
               - column: { name: kind,       type: VARCHAR(64) }
-              - column: { name: created_at, type: TIMESTAMP WITHOUT TIME ZONE, defaultValueComputed: NOW() }
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITHOUT TIME ZONE
+                  defaultValueComputed: NOW()
 
-  # Garante colunas, só se estiverem faltando
+  # 2) “Ensure” de colunas — roda só se a coluna estiver faltando
   - changeSet:
       id: audit-002-ensure-col-event
       author: system
@@ -33,10 +60,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: event
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
               - column: { name: event, type: VARCHAR(50) }
@@ -49,10 +78,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: env
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
               - column: { name: env, type: VARCHAR(10) }
@@ -65,10 +96,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: sha
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
               - column: { name: sha, type: VARCHAR(64) }
@@ -81,10 +114,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: branch
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
               - column: { name: branch, type: VARCHAR(128) }
@@ -97,10 +132,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: actor
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
               - column: { name: actor, type: VARCHAR(64) }
@@ -113,10 +150,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: kind
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
               - column: { name: kind, type: VARCHAR(64) }
@@ -129,10 +168,15 @@ databaseChangeLog:
         onFail: MARK_RAN
         not:
           columnExists:
+            schemaName: lb_meta
             tableName: lb_audit
             columnName: created_at
       changes:
         - addColumn:
+            schemaName: lb_meta
             tableName: lb_audit
             columns:
-              - column: { name: created_at, type: TIMESTAMP WITHOUT TIME ZONE, defaultValueComputed: NOW() }
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITHOUT TIME ZONE
+                  defaultValueComputed: NOW()

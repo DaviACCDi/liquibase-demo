@@ -79,8 +79,8 @@ jobs:
         env:
           TAG_PRE: reset-${{ matrix.env }}-${{ github.sha }}-pre
         run: |
-          # Executa apenas o contexto 'reset'
-          bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}" --contexts=reset
+          # Executa apenas o contexto 'reset' deixar comentando abaixo quando nao for usar
+          #bash liquibase/scripts/ci_deploy.sh "${ENV_ARG^^}" --contexts=reset
 
       # Opcional: anexar o plan (útil pra auditoria)
       - name: Upload plan (${{ matrix.env }})

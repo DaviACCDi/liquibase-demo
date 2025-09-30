@@ -9,6 +9,7 @@ databaseChangeLog:
       changes:
         - createTable:
             tableName: order_header
+            schemaName: lb_app
             columns:
               - column:
                   name: id
@@ -32,30 +33,36 @@ databaseChangeLog:
                   defaultValueNumeric: 1
               - column:
                   name: total
-                  type: "numeric(10,2)"   # quote types with commas/parentheses
+                  type: "numeric(10,2)"
               - column:
                   name: created_at
                   type: timestamp
                   defaultValueComputed: CURRENT_TIMESTAMP
         - addForeignKeyConstraint:
             baseTableName: order_header
+            baseTableSchemaName: lb_app
             baseColumnNames: person_id
             referencedTableName: person
+            referencedTableSchemaName: lb_app
             referencedColumnNames: id
             constraintName: fk_order_person
         - addForeignKeyConstraint:
             baseTableName: order_header
+            baseTableSchemaName: lb_app
             baseColumnNames: product_id
             referencedTableName: product
+            referencedTableSchemaName: lb_app
             referencedColumnNames: id
             constraintName: fk_order_product
         - createIndex:
             tableName: order_header
+            schemaName: lb_app
             indexName: idx_order_person
             columns:
               - column: { name: person_id }
         - createIndex:
             tableName: order_header
+            schemaName: lb_app
             indexName: idx_order_product
             columns:
               - column: { name: product_id }
@@ -70,6 +77,7 @@ databaseChangeLog:
       changes:
         - addColumn:
             tableName: order_header
+            schemaName: lb_app
             columns:
               - column:
                   name: status
@@ -77,6 +85,7 @@ databaseChangeLog:
                   defaultValue: "NEW"
         - update:
             tableName: order_header
+            schemaName: lb_app
             columns:
               - column:
                   name: status
@@ -84,5 +93,6 @@ databaseChangeLog:
             where: "status IS NULL"
         - addNotNullConstraint:
             tableName: order_header
+            schemaName: lb_app
             columnName: status
             columnDataType: varchar(20)

@@ -9,6 +9,7 @@ databaseChangeLog:
       changes:
         - createTable:
             tableName: product
+            schemaName: lb_app
             columns:
               - column:
                   name: id
@@ -29,10 +30,12 @@ databaseChangeLog:
                   type: "numeric(10,2)"   # quote types with commas/parentheses
         - addUniqueConstraint:
             tableName: product
+            schemaName: lb_app
             columnNames: sku
             constraintName: uq_product_sku
         - createIndex:
             tableName: product
+            schemaName: lb_app
             indexName: idx_product_sku
             columns:
               - column:
@@ -48,6 +51,7 @@ databaseChangeLog:
       changes:
         - addColumn:
             tableName: product
+            schemaName: lb_app
             columns:
               - column:
                   name: category

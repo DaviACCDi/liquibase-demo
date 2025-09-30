@@ -73,24 +73,21 @@ classify_plan() {
   local f="$1"
   local U; U="$(tr '[:lower:]' '[:upper:]' < "$f" 2>/dev/null || true)"
   [[ -z "$U" ]] && { echo "other"; return; }
-  if   grep -Eq '\bDROP\s+(TABLE|COLUMN|INDEX|CONSTRAINT)\b' <<<"$U"; then echo "schema:drop"
-  elif grep -Eq '\bCREATE\s+TABLE\b'                        <<<"$U"; then echo "schema:create-table"
+  if   grep -Eq '\bCREATE\s+TABLE\b'                        <<<"$U"; then echo "schema:create-table"
   elif grep -Eq '\bALTER\s+TABLE\b.*\bADD\s+COLUMN\b'       <<<"$U"; then echo "schema:add-column"
   elif grep -Eq '\bALTER\s+TABLE\b'                         <<<"$U"; then echo "schema:alter"
+  elif grep -Eq '\bDROP\s+(TABLE|COLUMN|INDEX|CONSTRAINT)\b'<<<"$U"; then echo "schema:drop"
   elif grep -Eq '\b(INSERT|UPDATE|DELETE|MERGE)\b'          <<<"$U"; then echo "data:mutation"
   else  echo "other"
   fi
 }
 
+
 run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
   docker run --rm --network host -w /workspace \
-    -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
-    bash -lc 'echo "[container] /workspace:"; ls -la /workspace; ls -la /workspace/changelogs || true'
-
-  docker run --rm --network host -w /workspace \
-    -e "JAVA_OPTS=-Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
+    -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
     -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
     --defaultsFile="/workspace/conf/$PROPS" \
     --log-level=info \
@@ -99,6 +96,7 @@ run_liquibase() {
     --password="$DB_PASS" \
     "$@" "${EXTRA_ARGS[@]}"
 }
+
 
 log_ctx() {
   echo "### Context"
@@ -131,7 +129,7 @@ log_audit() {
   docker run --rm --network host \
     -e PGPASSWORD="$DB_PASS" postgres:15 \
     psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
-    -c "INSERT INTO lb_audit (event, env, sha, branch, actor, kind)
+    -c "INSERT INTO lb_meta.lb_audit (event, env, sha, branch, actor, kind)
         VALUES ('$EVENT', '$ENV_NAME', '$SHA', '$BRANCH', '$DEPLOYER', '$KIND');" || true
 }
 
