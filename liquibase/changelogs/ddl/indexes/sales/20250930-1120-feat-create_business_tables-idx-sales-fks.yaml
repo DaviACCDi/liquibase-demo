@@ -1,21 +1,31 @@
 databaseChangeLog:
-- changeSet:
-id: 20250930-1120-feat-create_business_tables-idx-sales-fks
-author: ${deployer}
-comment: "Criar índices para FKs de sales"
-preConditions:
-onFail: MARK_RAN
-changes:
-- createIndex:
-schemaName: app_core
-tableName: sales
-indexName: idx_sales_customer
-columns: [ { column: { name: customer_id } } ]
-- createIndex:
-schemaName: app_core
-tableName: sales
-indexName: idx_sales_product
-columns: [ { column: { name: product_id } } ]
-rollback:
-- dropIndex: { schemaName: app_core, tableName: sales, indexName: idx_sales_customer }
-- dropIndex: { schemaName: app_core, tableName: sales, indexName: idx_sales_product }
+  - changeSet:
+      id: 20250930-1120-feat-create_business_tables-idx-sales-fks
+      author: ${deployer}
+      comment: "Criar índices para FKs de app_core.sales"
+      preConditions:
+        onFail: MARK_RAN
+      changes:
+        - createIndex:
+            schemaName: app_core
+            tableName: sales
+            indexName: idx_sales_customer
+            columns:
+              - column:
+                  name: customer_id
+        - createIndex:
+            schemaName: app_core
+            tableName: sales
+            indexName: idx_sales_product
+            columns:
+              - column:
+                  name: product_id
+      rollback:
+        - dropIndex:
+            schemaName: app_core
+            tableName: sales
+            indexName: idx_sales_customer
+        - dropIndex:
+            schemaName: app_core
+            tableName: sales
+            indexName: idx_sales_product
