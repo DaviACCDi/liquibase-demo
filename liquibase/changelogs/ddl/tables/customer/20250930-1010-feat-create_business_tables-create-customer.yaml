@@ -1,29 +1,44 @@
 databaseChangeLog:
-- changeSet:
-id: 20250930-1010-feat-create_business_tables-create-customer
-author: ${deployer}
-comment: "Criar tabela app_core.customer"
-preConditions:
-onFail: MARK_RAN
-not:
-tableExists: { schemaName: app_core, tableName: customer }
-changes:
-- createTable:
-schemaName: app_core
-tableName: customer
-remarks: "Clientes"
-columns:
-- column:
-name: id
-type: BIGINT
-autoIncrement: true
-constraints: { primaryKey: true, nullable: false }
-- column: { name: name, type: VARCHAR(150), constraints: { nullable: false } }
-- column: { name: email, type: VARCHAR(150) }
-- column: { name: status, type: VARCHAR(20), defaultValue: active }
-- column:
-name: created_at
-type: TIMESTAMP WITHOUT TIME ZONE
-defaultValueComputed: NOW()
-rollback:
-- dropTable: { schemaName: app_core, tableName: customer }
+  - changeSet:
+      id: 20250930-1010-feat-create_business_tables-create-customer
+      author: ${deployer}
+      comment: "Criar tabela app_core.customer"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            schemaName: app_core
+            tableName: customer
+      changes:
+        - createTable:
+            schemaName: app_core
+            tableName: customer
+            remarks: "Clientes"
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: name
+                  type: VARCHAR(150)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: email
+                  type: VARCHAR(150)
+              - column:
+                  name: status
+                  type: VARCHAR(20)
+                  defaultValue: "active"
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITHOUT TIME ZONE
+                  defaultValueComputed: NOW()
+      rollback:
+        - dropTable:
+            schemaName: app_core
+            tableName: customer

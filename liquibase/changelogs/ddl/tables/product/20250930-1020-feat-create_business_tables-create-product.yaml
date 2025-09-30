@@ -1,29 +1,47 @@
 databaseChangeLog:
-- changeSet:
-id: 20250930-1020-feat-create_business_tables-create-product
-author: ${deployer}
-comment: "Criar tabela app_core.product"
-preConditions:
-onFail: MARK_RAN
-not:
-tableExists: { schemaName: app_core, tableName: product }
-changes:
-- createTable:
-schemaName: app_core
-tableName: product
-remarks: "Produtos"
-columns:
-- column:
-name: id
-type: BIGINT
-autoIncrement: true
-constraints: { primaryKey: true, nullable: false }
-- column: { name: sku, type: VARCHAR(50), constraints: { nullable: false } }
-- column: { name: name, type: VARCHAR(150), constraints: { nullable: false } }
-- column: { name: price, type: NUMERIC(12,2), constraints: { nullable: false } }
-- column:
-name: created_at
-type: TIMESTAMP WITHOUT TIME ZONE
-defaultValueComputed: NOW()
-rollback:
-- dropTable: { schemaName: app_core, tableName: product }
+  - changeSet:
+      id: 20250930-1020-feat-create_business_tables-create-product
+      author: ${deployer}
+      comment: "Criar tabela app_core.product"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            schemaName: app_core
+            tableName: product
+      changes:
+        - createTable:
+            schemaName: app_core
+            tableName: product
+            remarks: "Produtos"
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: sku
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: name
+                  type: VARCHAR(150)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: price
+                  type: NUMERIC(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITHOUT TIME ZONE
+                  defaultValueComputed: NOW()
+      rollback:
+        - dropTable:
+            schemaName: app_core
+            tableName: product
