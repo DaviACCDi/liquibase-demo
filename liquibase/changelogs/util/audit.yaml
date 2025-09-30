@@ -1,7 +1,7 @@
 # liquibase/changelogs/util/audit.yaml
 databaseChangeLog:
 
-  # 0) Garante o schema de metadados
+  # 000) Cria o schema lb_meta apenas se NÃO existir (usando sqlCheck compatível com OSS)
   - changeSet:
       id: audit-000-create-schema
       author: system
@@ -9,14 +9,14 @@ databaseChangeLog:
       preConditions:
         onFail: MARK_RAN
         onError: HALT
-        not:
-          schemaExists:
-            schemaName: lb_meta
+        - sqlCheck:
+            expectedResult: "0"
+            sql: "SELECT COUNT(*) FROM pg_namespace WHERE nspname = 'lb_meta'"
       changes:
         - createSchema:
             schemaName: lb_meta
 
-  # 1) Cria a tabela somente se NÃO existir
+  # 001) Cria a tabela somente se NÃO existir
   - changeSet:
       id: audit-001-create-table
       author: system
@@ -24,10 +24,10 @@ databaseChangeLog:
       preConditions:
         onFail: MARK_RAN
         onError: HALT
-        not:
-          tableExists:
-            schemaName: lb_meta
-            tableName: lb_audit
+        - not:
+            - tableExists:
+                schemaName: lb_meta
+                tableName: lb_audit
       changes:
         - createTable:
             schemaName: lb_meta
@@ -51,18 +51,18 @@ databaseChangeLog:
                   type: TIMESTAMP WITHOUT TIME ZONE
                   defaultValueComputed: NOW()
 
-  # 2) “Ensure” de colunas — roda só se a coluna estiver faltando
+  # 002) Ensure colunas (só se faltarem)
   - changeSet:
       id: audit-002-ensure-col-event
       author: system
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: event
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: event
       changes:
         - addColumn:
             schemaName: lb_meta
@@ -76,11 +76,11 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: env
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: env
       changes:
         - addColumn:
             schemaName: lb_meta
@@ -94,11 +94,11 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: sha
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: sha
       changes:
         - addColumn:
             schemaName: lb_meta
@@ -112,11 +112,11 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: branch
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: branch
       changes:
         - addColumn:
             schemaName: lb_meta
@@ -130,11 +130,11 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: actor
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: actor
       changes:
         - addColumn:
             schemaName: lb_meta
@@ -148,11 +148,11 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: kind
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: kind
       changes:
         - addColumn:
             schemaName: lb_meta
@@ -166,11 +166,11 @@ databaseChangeLog:
       context: meta
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: created_at
+        - not:
+            - columnExists:
+                schemaName: lb_meta
+                tableName: lb_audit
+                columnName: created_at
       changes:
         - addColumn:
             schemaName: lb_meta
