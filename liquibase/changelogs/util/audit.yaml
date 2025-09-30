@@ -1,5 +1,5 @@
+# liquibase/changelogs/util/audit.yaml
 databaseChangeLog:
-  # 000) Garante o schema lb_meta (compatível com OSS usando SQL puro)
   - changeSet:
       id: audit-000-create-schema
       author: ${deployer}
@@ -9,12 +9,12 @@ databaseChangeLog:
         onFail: MARK_RAN
         onError: HALT
         not:
-          schemaExists:
-            schemaName: lb_meta
+          sqlCheck:
+            expectedResult: 1
+            sql: "select 1 from information_schema.schemata where schema_name = 'lb_meta'"
       changes:
         - sql: "CREATE SCHEMA IF NOT EXISTS lb_meta"
 
-  # 001) Cria a tabela lb_meta.lb_audit se não existir
   - changeSet:
       id: audit-001-create-table
       author: ${deployer}
@@ -36,38 +36,23 @@ databaseChangeLog:
                   name: id
                   type: BIGINT
                   autoIncrement: true
-                  constraints:
-                    primaryKey: true
-                    nullable: false
-              - column:
-                  name: event
-                  type: VARCHAR(50)
-              - column:
-                  name: env
-                  type: VARCHAR(10)
-              - column:
-                  name: sha
-                  type: VARCHAR(64)
-              - column:
-                  name: branch
-                  type: VARCHAR(128)
-              - column:
-                  name: actor
-                  type: VARCHAR(64)
-              - column:
-                  name: kind
-                  type: VARCHAR(64)
+                  constraints: { primaryKey: true, nullable: false }
+              - column: { name: event,   type: VARCHAR(50) }
+              - column: { name: env,     type: VARCHAR(10) }
+              - column: { name: sha,     type: VARCHAR(64) }
+              - column: { name: branch,  type: VARCHAR(128) }
+              - column: { name: actor,   type: VARCHAR(64) }
+              - column: { name: kind,    type: VARCHAR(64) }
               - column:
                   name: created_at
                   type: TIMESTAMP WITHOUT TIME ZONE
                   defaultValueComputed: NOW()
 
-  # 002) Exemplo de "ensure column" idempotente (só adiciona se faltou)
   - changeSet:
       id: audit-002-ensure-col-env
       author: ${deployer}
       context: meta
-      comment: "Garante coluna env (caso tenha sido criada sem ela em bancos antigos)"
+      comment: "Garante coluna env caso bancos antigos não a possuam"
       preConditions:
         onFail: MARK_RAN
         onError: HALT
@@ -81,6 +66,4 @@ databaseChangeLog:
             schemaName: lb_meta
             tableName: lb_audit
             columns:
-              - column:
-                  name: env
-                  type: VARCHAR(10)
+              - column: { name: env, type: VARCHAR(10) }
