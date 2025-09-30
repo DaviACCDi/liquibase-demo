@@ -1,17 +1,17 @@
 databaseChangeLog:
   # DDL
-  - includeAll: { path: changelogs/ddl/tables,      relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/ddl/constraints, relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/ddl/indexes,     relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/ddl/views,       relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/ddl/functions,   relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/ddl/triggers,    relativeToChangelogFile: true }
+  - includeAll: { path: ddl/tables,      relativeToChangelogFile: true }
+  - includeAll: { path: ddl/constraints, relativeToChangelogFile: true }
+  - includeAll: { path: ddl/indexes,     relativeToChangelogFile: true }
+  - includeAll: { path: ddl/views,       relativeToChangelogFile: true }
+  - includeAll: { path: ddl/functions,   relativeToChangelogFile: true }
+  - includeAll: { path: ddl/triggers,    relativeToChangelogFile: true }
 
   # Util
-  - includeAll: { path: changelogs/util,            relativeToChangelogFile: true }
+  - includeAll: { path: util,            relativeToChangelogFile: true }
 
   # DML
-  - includeAll: { path: changelogs/dml/refdata,     relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/dml/seed,        relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/dml/fixes,       relativeToChangelogFile: true }
-  - includeAll: { path: changelogs/dml/testdata,    relativeToChangelogFile: true }
+  - includeAll: { path: dml/refdata,     relativeToChangelogFile: true }
+  - includeAll: { path: dml/seed,        relativeToChangelogFile: true }
+  - includeAll: { path: dml/fixes,       relativeToChangelogFile: true }
+  - includeAll: { path: dml/testdata,    relativeToChangelogFile: true }
