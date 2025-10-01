@@ -6,32 +6,29 @@ LB_DIR="${LB_DIR:-liquibase}"
 WORKDIR="${GITHUB_WORKSPACE:-$PWD}"
 DEPLOYER="${GITHUB_ACTOR:-ci-runner}"
 
-# Liquibase 5.x + plugin runtime (cache de plugins em volume)
+# Liquibase 5.x
 LIQUIBASE_IMAGE="${LIQUIBASE_IMAGE:-liquibase/liquibase:5.0}"
 LIQUIBASE_PLUGINS_VOL="${LIQUIBASE_PLUGINS_VOL:-liquibase_plugins_cache}"
-LIQUIBASE_HOME_IN_CONTAINER="/liquibase"
-# Pode instalar mais plugins separados por espaço (ex.: "postgresql commandlinemetrics")
-LIQUIBASE_EXTENSIONS="${LIQUIBASE_EXTENSIONS:-postgresql}"
+LIQUIBASE_HOME_IN_CONTAINER="/liquibase"      # mapeado como volume p/ cachear jars/plugins
 
 # ================== ARGs / INPUTS ==================
 # ENV LIST (DEV|TEST|PROD), pode ser múltiplo: "DEV,TEST" ou "ALL"
-# 1) Tenta pegar do 1º argumento se NÃO começar com '-'
 ENV_LIST_RAW=""
 if [[ $# -gt 0 && "${1#-}" == "$1" ]]; then
   ENV_LIST_RAW="$1"
   shift
 fi
 
-# 2) Args extras p/ Liquibase (ex.: --contexts=reset,ddl)
+# Args extras p/ Liquibase (ex.: --contexts=ddl,seed)
 EXTRA_ARGS=("$@")
 
-# 3) Fallbacks se não veio arg posicional
+# Fallbacks se não veio arg posicional
 if [[ -z "${ENV_LIST_RAW}" ]]; then
   for _cand in \
       "${ENV_ARG:-}" "${ENV:-}" \
       "${INPUT_ENVS:-}" "${INPUT_ENV:-}" \
       "${GITHUB_INPUT_ENVS:-}" "${GITHUB_INPUT_ENV:-}"; do
-    if [[ -n "$_cand" ]]; then ENV_LIST_RAW="$_cand"; break; fi
+    if [[ -n "$_cand" ]]; then ENV_LIST_RAW="$(_cmd="$_cand"; printf "%s" "$_cmd")"; break; fi
   done
 fi
 if [[ -z "${ENV_LIST_RAW}" ]]; then
@@ -41,8 +38,8 @@ if [[ -z "${ENV_LIST_RAW}" ]]; then
 fi
 
 # apply | plan | tag
-MODE="${MODE:-apply}"          # default: apply
-TAG_NAME="${TAG_NAME:-}"       # usado quando MODE=tag
+MODE="${MODE:-apply}"         # default: apply
+TAG_NAME="${TAG_NAME:-}"      # usado quando MODE=tag
 
 # ================== UTILS ==================
 mask() {
@@ -114,12 +111,12 @@ classify_plan() {
   fi
 }
 
-# ================== LIQUIBASE (5.x + plugin) ==================
+# ================== LIQUIBASE 5.x (sem 'install extension') ==================
 run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
 
-  # 1) Instala plugin(s) e garante o JDBC no cache persistente do Liquibase
+  # 1) Garante LIQUIBASE_HOME e o JDBC do Postgres no cache persistente
   docker run --rm --network host -w /workspace \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
@@ -130,14 +127,6 @@ run_liquibase() {
       echo "[lb] LIQUIBASE_HOME=${LIQUIBASE_HOME:-/liquibase}"
       mkdir -p "${LIQUIBASE_HOME}/lib"
 
-      # Tenta instalar a extensão do Postgres (Liquibase 5.x)
-      for ext in '"$LIQUIBASE_EXTENSIONS"' postgresql liquibase-postgresql; do
-        [ -n "$ext" ] || continue
-        echo "[lb] install extension: $ext"
-        liquibase --no-prompt --log-level=info install "$ext" || true
-      done
-
-      # Fallback robusto: baixa o JDBC do Postgres se não existir ainda
       JAR="${LIQUIBASE_HOME}/lib/postgresql-42.7.4.jar"
       if [ ! -s "$JAR" ]; then
         echo "[lb] fetching JDBC driver → $JAR"
@@ -146,14 +135,13 @@ run_liquibase() {
         elif command -v wget >/dev/null 2>&1; then
           wget -qO "$JAR" https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
         else
-          echo "::warning::nem curl nem wget no container; tentando mesmo assim sem JDBC baixado"
+          echo "::warning::nem curl nem wget no container; tentando sem baixar JDBC"
         fi
       fi
-
       echo "[lb] extensions/lib ready."
     '
 
-  # 2) Executa o comando com plugins e JDBC disponíveis (via CLASSPATH)
+  # 2) Executa o comando com JDBC disponível (via CLASSPATH)
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
@@ -169,8 +157,6 @@ run_liquibase() {
       --password="${DB_PASS}" \
       "$@" "${EXTRA_ARGS[@]}"
 }
-
-
 
 log_ctx() {
   echo "### Context"
@@ -210,11 +196,13 @@ log_audit() {
 
   echo "[AUDIT] ${ENV_NAME} ${EVENT} (${KIND}) sha=${SHA} branch=${BRANCH} actor=${DEPLOYER}"
 
+  # Silencia completamente caso a tabela ainda não exista
   docker run --rm --network host \
     -e PGPASSWORD="$DB_PASS" postgres:15 \
     psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
     -c "INSERT INTO lb_meta.lb_audit (event, env, sha, branch, actor, kind)
-        VALUES ('$EVENT', '$ENV_NAME', '$SHA', '$BRANCH', '$DEPLOYER', '$KIND');" || true
+        VALUES ('$EVENT', '$ENV_NAME', '$SHA', '$BRANCH', '$DEPLOYER', '$KIND');" \
+    >/dev/null 2>&1 || true
 }
 
 pick_jdbc_for_env() {
@@ -245,19 +233,6 @@ promote() {
 
   tcp_probe
   ensure_schemas
-
-  # Contexto de reset isolado
-  if [[ " ${EXTRA_ARGS[*]-} " == *"--contexts=reset"* ]]; then
-    echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME…"
-    local PLAN_FILE="plan_${ENV_NAME}.sql"
-    if [[ "$MODE" == "plan" ]]; then
-      run_liquibase "$PROPS" updateSQL > "$PLAN_FILE"
-      tail -n 80 "$PLAN_FILE" || true
-    else
-      run_liquibase "$PROPS" update
-    fi
-    return 0
-  fi
 
   echo "===== [$ENV_NAME] VALIDATE ====="
   run_liquibase "$PROPS" validate
@@ -314,12 +289,13 @@ tag_only() {
 # Normaliza lista de ambientes
 ENV_INPUT_UP="$(echo "$ENV_LIST_RAW" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
 if [[ "$ENV_INPUT_UP" == "ALL" ]]; then
+  ENV_LIST=("DEV" "TEST " "PROD")
   ENV_LIST=("DEV" "TEST" "PROD")
 else
   IFS=',' read -r -a ENV_LIST <<<"$ENV_INPUT_UP"
 fi
 
-# Valida
+# Valida ambientes
 for E in "${ENV_LIST[@]}"; do
   case "$E" in
     DEV|TEST|PROD) ;;
@@ -327,7 +303,7 @@ for E in "${ENV_LIST[@]}"; do
   esac
 done
 
-# Executa
+# Executa por ambiente
 for ENV in "${ENV_LIST[@]}"; do
   pick_jdbc_for_env "$ENV"
   case "$MODE" in

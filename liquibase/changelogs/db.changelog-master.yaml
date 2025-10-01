@@ -7,8 +7,8 @@ databaseChangeLog:
 #  - includeAll: { path: ddl/functions,   relativeToChangelogFile: true }
 #  - includeAll: { path: ddl/triggers,    relativeToChangelogFile: true }
 
-  # Util
-  - includeAll: { path: util,            relativeToChangelogFile: true }
+  # Util (sem reset)
+  - include: { file: util/audit.yaml,    relativeToChangelogFile: true }
 
   # DML
   - includeAll: { path: dml/refdata,     relativeToChangelogFile: true }
