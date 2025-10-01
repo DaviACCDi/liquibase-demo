@@ -116,7 +116,7 @@ run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
 
-  # 1) Garante LIQUIBASE_HOME e o JDBC do Postgres no cache persistente
+  # 1) preparar plugins/jdbc (mesmo de antes, mas com checagem forte)
   docker run --rm --network host -w /workspace \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
@@ -127,6 +127,14 @@ run_liquibase() {
       echo "[lb] LIQUIBASE_HOME=${LIQUIBASE_HOME:-/liquibase}"
       mkdir -p "${LIQUIBASE_HOME}/lib"
 
+      # (opcional) tentativas de install – ignoradas se não existir no v5
+      for ext in '"$LIQUIBASE_EXTENSIONS"' postgresql liquibase-postgresql; do
+        [ -n "$ext" ] || continue
+        echo "[lb] install extension: $ext"
+        liquibase --no-prompt --log-level=warning install "$ext" || true
+      done
+
+      # JDBC
       JAR="${LIQUIBASE_HOME}/lib/postgresql-42.7.4.jar"
       if [ ! -s "$JAR" ]; then
         echo "[lb] fetching JDBC driver → $JAR"
@@ -134,17 +142,24 @@ run_liquibase() {
           curl -fsSL -o "$JAR" https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
         elif command -v wget >/dev/null 2>&1; then
           wget -qO "$JAR" https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
-        else
-          echo "::warning::nem curl nem wget no container; tentando sem baixar JDBC"
         fi
       fi
+
+      if [ ! -s "$JAR" ]; then
+        echo "::error::PostgreSQL JDBC não encontrado. Sem acesso à internet no runner?"
+        echo "        Baixe o JAR e commit/adicione em liquibase/lib/ ou habilite egress."
+        exit 9
+      fi
+
       echo "[lb] extensions/lib ready."
+      ls -l "${LIQUIBASE_HOME}/lib" || true
     '
 
-  # 2) Executa o comando com JDBC disponível (via CLASSPATH)
+  # 2) executar com classpath explícito
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
+    -e "LIQUIBASE_CLASSPATH=${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
     -e "CLASSPATH=${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
@@ -155,8 +170,10 @@ run_liquibase() {
       --url="${JDBC_URL_NOAUTH}" \
       --username="${DB_USER}" \
       --password="${DB_PASS}" \
+      --classpath="${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
       "$@" "${EXTRA_ARGS[@]}"
 }
+
 
 log_ctx() {
   echo "### Context"
