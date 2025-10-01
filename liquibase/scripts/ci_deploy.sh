@@ -12,6 +12,11 @@ LIQUIBASE_PLUGINS_VOL="${LIQUIBASE_PLUGINS_VOL:-liquibase_plugins_cache}"
 LIQUIBASE_HOME_IN_CONTAINER="/liquibase"     # volume p/ cache de jars/plugins
 LIQUIBASE_EXTENSIONS="${LIQUIBASE_EXTENSIONS:-}"  # deixe vazio; será expandida apenas no container
 
+# JDBC que usaremos explicitamente (sem wildcard)
+PG_JDBC_VERSION="${PG_JDBC_VERSION:-42.7.4}"
+PG_JDBC_JAR="postgresql-${PG_JDBC_VERSION}.jar"
+PG_JDBC_PATH_IN_VOL="${LIQUIBASE_HOME_IN_CONTAINER}/lib/${PG_JDBC_JAR}"
+
 # ================== ARGs / INPUTS ==================
 # ENV LIST (DEV|TEST|PROD), pode ser múltiplo: "DEV,TEST" ou "ALL"
 ENV_LIST_RAW=""
@@ -78,7 +83,7 @@ parse_pg_url() {
     for kv in "${parts[@]}"; do
       [[ -z "$kv" ]] && continue
       case "$kv" in
-        user=*|password=*) ;;                 # remove cred params
+        user=*|password=*) ;;                  # remove cred params
         sslmode=*) have_ssl="1"; out_q="${out_q:+$out_q&}$kv" ;;
         *) out_q="${out_q:+$out_q&}$kv" ;;
       esac
@@ -117,10 +122,11 @@ run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
 
-  # 1) preparar plugins/jdbc no volume de cache
+  # 1) preparar plugins/jdbc no volume de cache (NÃO expandir variáveis do host aqui!)
   docker run --rm --network host -w /workspace \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
     -e "LIQUIBASE_EXTENSIONS=${LIQUIBASE_EXTENSIONS:-}" \
+    -e "PG_JDBC_JAR=${PG_JDBC_JAR}" \
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
     "$LIQUIBASE_IMAGE" \
@@ -129,27 +135,34 @@ run_liquibase() {
       echo "[lb] LIQUIBASE_HOME=${LIQUIBASE_HOME:-/liquibase}"
       mkdir -p "${LIQUIBASE_HOME}/lib"
 
-      # Se o comando "install" não existir nessa versão, o erro é ignorado.
+      # Tente instalar extensões (Liquibase 5 ignora/sem comando -> tolerar)
       for ext in ${LIQUIBASE_EXTENSIONS:-} postgresql liquibase-postgresql; do
         [ -n "$ext" ] || continue
         echo "[lb] install extension: $ext"
         liquibase --no-prompt --log-level=warning install "$ext" || true
       done
 
-      # JDBC driver
-      JAR="${LIQUIBASE_HOME}/lib/postgresql-42.7.4.jar"
+      # Preferir JAR local do repo (liquibase/lib) se existir
+      if compgen -G "/workspace/lib/postgresql-*.jar" >/dev/null 2>&1; then
+        cp -f /workspace/lib/postgresql-*.jar "${LIQUIBASE_HOME}/lib/" || true
+      fi
+
+      # Garantir JDBC específico
+      JAR="${LIQUIBASE_HOME}/lib/${PG_JDBC_JAR}"
       if [ ! -s "$JAR" ]; then
         echo "[lb] fetching JDBC driver → $JAR"
+        URL="https://repo1.maven.org/maven2/org/postgresql/postgresql/${PG_JDBC_JAR#postgresql-}"
+        URL="https://repo1.maven.org/maven2/org/postgresql/postgresql/'"${PG_JDBC_VERSION}"'/postgresql-'"${PG_JDBC_VERSION}"'.jar"
         if command -v curl >/dev/null 2>&1; then
-          curl -fsSL -o "$JAR" https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
+          curl -fsSL -o "$JAR" "$URL" || true
         elif command -v wget >/dev/null 2>&1; then
-          wget -qO "$JAR" https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
+          wget -qO "$JAR" "$URL" || true
         fi
       fi
 
       if [ ! -s "$JAR" ]; then
         echo "::error::PostgreSQL JDBC não encontrado. Sem egress do runner?"
-        echo "        Baixe o JAR e commit/adicione em liquibase/lib/ OU habilite egress."
+        echo "        Commit um JAR em liquibase/lib/ OU habilite egress."
         exit 9
       fi
 
@@ -157,12 +170,12 @@ run_liquibase() {
       ls -l "${LIQUIBASE_HOME}/lib" || true
     '
 
-  # 2) executar comando com classpath explícito
+  # 2) executar comando com classpath EXPLÍCITO (sem wildcard)
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
-    -e "LIQUIBASE_CLASSPATH=${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
-    -e "CLASSPATH=${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
+    -e "LIQUIBASE_CLASSPATH=${PG_JDBC_PATH_IN_VOL}" \
+    -e "CLASSPATH=${PG_JDBC_PATH_IN_VOL}" \
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
     "$LIQUIBASE_IMAGE" \
@@ -172,7 +185,7 @@ run_liquibase() {
       --url="${JDBC_URL_NOAUTH}" \
       --username="${DB_USER}" \
       --password="${DB_PASS}" \
-      --classpath="${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
+      --classpath="${PG_JDBC_PATH_IN_VOL}" \
       "$@" "${EXTRA_ARGS[@]}"
 }
 
