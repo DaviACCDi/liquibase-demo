@@ -9,7 +9,8 @@ DEPLOYER="${GITHUB_ACTOR:-ci-runner}"
 # Liquibase 5.x
 LIQUIBASE_IMAGE="${LIQUIBASE_IMAGE:-liquibase/liquibase:5.0}"
 LIQUIBASE_PLUGINS_VOL="${LIQUIBASE_PLUGINS_VOL:-liquibase_plugins_cache}"
-LIQUIBASE_HOME_IN_CONTAINER="/liquibase"      # mapeado como volume p/ cachear jars/plugins
+LIQUIBASE_HOME_IN_CONTAINER="/liquibase"     # volume p/ cache de jars/plugins
+LIQUIBASE_EXTENSIONS="${LIQUIBASE_EXTENSIONS:-}"  # deixe vazio; será expandida apenas no container
 
 # ================== ARGs / INPUTS ==================
 # ENV LIST (DEV|TEST|PROD), pode ser múltiplo: "DEV,TEST" ou "ALL"
@@ -38,8 +39,8 @@ if [[ -z "${ENV_LIST_RAW}" ]]; then
 fi
 
 # apply | plan | tag
-MODE="${MODE:-apply}"         # default: apply
-TAG_NAME="${TAG_NAME:-}"      # usado quando MODE=tag
+MODE="${MODE:-apply}"   # default: apply
+TAG_NAME="${TAG_NAME:-}"
 
 # ================== UTILS ==================
 mask() {
@@ -111,14 +112,15 @@ classify_plan() {
   fi
 }
 
-# ================== LIQUIBASE 5.x (sem 'install extension') ==================
+# ================== LIQUIBASE (v5) ==================
 run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
 
-  # 1) preparar plugins/jdbc (mesmo de antes, mas com checagem forte)
+  # 1) preparar plugins/jdbc no volume de cache
   docker run --rm --network host -w /workspace \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
+    -e "LIQUIBASE_EXTENSIONS=${LIQUIBASE_EXTENSIONS:-}" \
     -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
     -v "$WORKDIR/$LB_DIR:/workspace" \
     "$LIQUIBASE_IMAGE" \
@@ -127,14 +129,14 @@ run_liquibase() {
       echo "[lb] LIQUIBASE_HOME=${LIQUIBASE_HOME:-/liquibase}"
       mkdir -p "${LIQUIBASE_HOME}/lib"
 
-      # (opcional) tentativas de install – ignoradas se não existir no v5
-      for ext in '"$LIQUIBASE_EXTENSIONS"' postgresql liquibase-postgresql; do
+      # Se o comando "install" não existir nessa versão, o erro é ignorado.
+      for ext in ${LIQUIBASE_EXTENSIONS:-} postgresql liquibase-postgresql; do
         [ -n "$ext" ] || continue
         echo "[lb] install extension: $ext"
         liquibase --no-prompt --log-level=warning install "$ext" || true
       done
 
-      # JDBC
+      # JDBC driver
       JAR="${LIQUIBASE_HOME}/lib/postgresql-42.7.4.jar"
       if [ ! -s "$JAR" ]; then
         echo "[lb] fetching JDBC driver → $JAR"
@@ -146,8 +148,8 @@ run_liquibase() {
       fi
 
       if [ ! -s "$JAR" ]; then
-        echo "::error::PostgreSQL JDBC não encontrado. Sem acesso à internet no runner?"
-        echo "        Baixe o JAR e commit/adicione em liquibase/lib/ ou habilite egress."
+        echo "::error::PostgreSQL JDBC não encontrado. Sem egress do runner?"
+        echo "        Baixe o JAR e commit/adicione em liquibase/lib/ OU habilite egress."
         exit 9
       fi
 
@@ -155,7 +157,7 @@ run_liquibase() {
       ls -l "${LIQUIBASE_HOME}/lib" || true
     '
 
-  # 2) executar com classpath explícito
+  # 2) executar comando com classpath explícito
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
     -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
@@ -173,7 +175,6 @@ run_liquibase() {
       --classpath="${LIQUIBASE_HOME_IN_CONTAINER}/lib/*" \
       "$@" "${EXTRA_ARGS[@]}"
 }
-
 
 log_ctx() {
   echo "### Context"
@@ -213,7 +214,7 @@ log_audit() {
 
   echo "[AUDIT] ${ENV_NAME} ${EVENT} (${KIND}) sha=${SHA} branch=${BRANCH} actor=${DEPLOYER}"
 
-  # Silencia completamente caso a tabela ainda não exista
+  # 100% silencioso se a tabela ainda não existir
   docker run --rm --network host \
     -e PGPASSWORD="$DB_PASS" postgres:15 \
     psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
@@ -306,7 +307,6 @@ tag_only() {
 # Normaliza lista de ambientes
 ENV_INPUT_UP="$(echo "$ENV_LIST_RAW" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
 if [[ "$ENV_INPUT_UP" == "ALL" ]]; then
-  ENV_LIST=("DEV" "TEST " "PROD")
   ENV_LIST=("DEV" "TEST" "PROD")
 else
   IFS=',' read -r -a ENV_LIST <<<"$ENV_INPUT_UP"
