@@ -14,21 +14,15 @@ on:
         type: choice
         options: [apply, plan-only]
         default: apply
-      auto_merge:
-        description: "Auto-merge PR -> main if DB OK"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   # ===================== DEV =====================
   deploy-dev:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.env == 'dev' || github.event_name == 'push' && github.ref != 'refs/heads/main' }}
-    name: Deploy (DEV / ${{ inputs.mode || 'apply' }})
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.env == 'dev' }}
+    name: Deploy (DEV / ${{ inputs.mode }})
     runs-on: ubuntu-latest
     environment: dev
     concurrency:
@@ -62,13 +56,13 @@ jobs:
           echo "TAG_PRE=$TAG_PRE"
 
       - name: Liquibase apply (DEV)
-        if: inputs.mode == 'apply' || github.event_name == 'push'
+        if: ${{ inputs.mode == 'apply' }}
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
         run: bash liquibase/scripts/ci_deploy.sh DEV
 
       - name: Liquibase plan-only (DEV)
-        if: inputs.mode == 'plan-only' && github.event_name == 'workflow_dispatch'
+        if: ${{ inputs.mode == 'plan-only' }}
         env:
           MODE: plan
         run: bash liquibase/scripts/ci_deploy.sh DEV
@@ -118,13 +112,13 @@ jobs:
           echo "TAG_PRE=$TAG_PRE"
 
       - name: Liquibase apply (TEST)
-        if: inputs.mode == 'apply'
+        if: ${{ inputs.mode == 'apply' }}
         env:
           TAG_PRE: ${{ env.TAG_PRE }}
         run: bash liquibase/scripts/ci_deploy.sh TEST
 
       - name: Liquibase plan-only (TEST)
-        if: inputs.mode == 'plan-only'
+        if: ${{ inputs.mode == 'plan-only' }}
         env:
           MODE: plan
         run: bash liquibase/scripts/ci_deploy.sh TEST

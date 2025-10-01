@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 20250930-1110-idx-product-sku
+      author: ${deployer}
+      changes:
+        - createIndex:
+            schemaName: app_core
+            tableName: product
+            indexName: idx_product_sku
+            unique: true
+            columns:
+              - column:
+                  name: sku
+      rollback:
+        - dropIndex:
+            schemaName: app_core
+            tableName: product
+            indexName: idx_product_sku

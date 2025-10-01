@@ -1,0 +1,23 @@
+databaseChangeLog:
+  - changeSet:
+      id: 20250930-1050-fk-sales-product
+      author: ${deployer}
+      changes:
+        - addForeignKeyConstraint:
+            baseTableSchemaName: app_core
+            baseTableName: sales
+            baseColumnNames: product_id
+            constraintName: fk_sales_product
+            referencedTableSchemaName: app_core
+            referencedTableName: product
+            referencedColumnNames: id
+            onDelete: RESTRICT
+            onUpdate: CASCADE
+            deferrable: false
+            initiallyDeferred: false
+            validate: true
+      rollback:
+        - dropForeignKeyConstraint:
+            baseTableSchemaName: app_core
+            baseTableName: sales
+            constraintName: fk_sales_product

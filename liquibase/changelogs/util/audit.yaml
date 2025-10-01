@@ -1,25 +1,25 @@
 # liquibase/changelogs/util/audit.yaml
 databaseChangeLog:
-
-  # 000) Garante o schema lb_meta (compatível 100% com OSS usando SQL)
   - changeSet:
       id: audit-000-create-schema
-      author: system
+      author: ${deployer}
       context: meta
+      comment: "Cria o schema lb_meta se não existir"
       preConditions:
         onFail: MARK_RAN
         onError: HALT
-        sqlCheck:
-          expectedResult: "0"
-          sql: "SELECT COUNT(*) FROM pg_namespace WHERE nspname = 'lb_meta'"
+        not:
+          sqlCheck:
+            expectedResult: 1
+            sql: "select 1 from information_schema.schemata where schema_name = 'lb_meta'"
       changes:
         - sql: "CREATE SCHEMA IF NOT EXISTS lb_meta"
 
-  # 001) Cria a tabela somente se NÃO existir
   - changeSet:
       id: audit-001-create-table
-      author: system
+      author: ${deployer}
       context: meta
+      comment: "Cria tabela de auditoria lb_meta.lb_audit"
       preConditions:
         onFail: MARK_RAN
         onError: HALT
@@ -36,45 +36,26 @@ databaseChangeLog:
                   name: id
                   type: BIGINT
                   autoIncrement: true
-                  constraints:
-                    primaryKey: true
-                    nullable: false
-              - column: { name: event,      type: VARCHAR(50) }
-              - column: { name: env,        type: VARCHAR(10) }
-              - column: { name: sha,        type: VARCHAR(64) }
-              - column: { name: branch,     type: VARCHAR(128) }
-              - column: { name: actor,      type: VARCHAR(64) }
-              - column: { name: kind,       type: VARCHAR(64) }
+                  constraints: { primaryKey: true, nullable: false }
+              - column: { name: event,   type: VARCHAR(50) }
+              - column: { name: env,     type: VARCHAR(10) }
+              - column: { name: sha,     type: VARCHAR(64) }
+              - column: { name: branch,  type: VARCHAR(128) }
+              - column: { name: actor,   type: VARCHAR(64) }
+              - column: { name: kind,    type: VARCHAR(64) }
               - column:
                   name: created_at
                   type: TIMESTAMP WITHOUT TIME ZONE
                   defaultValueComputed: NOW()
 
-  # 002) Ensure colunas (só se faltarem)
   - changeSet:
-      id: audit-002-ensure-col-event
-      author: system
+      id: audit-002-ensure-col-env
+      author: ${deployer}
       context: meta
+      comment: "Garante coluna env caso bancos antigos não a possuam"
       preConditions:
         onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: event
-      changes:
-        - addColumn:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columns:
-              - column: { name: event, type: VARCHAR(50) }
-
-  - changeSet:
-      id: audit-003-ensure-col-env
-      author: system
-      context: meta
-      preConditions:
-        onFail: MARK_RAN
+        onError: HALT
         not:
           columnExists:
             schemaName: lb_meta
@@ -86,96 +67,3 @@ databaseChangeLog:
             tableName: lb_audit
             columns:
               - column: { name: env, type: VARCHAR(10) }
-
-  - changeSet:
-      id: audit-004-ensure-col-sha
-      author: system
-      context: meta
-      preConditions:
-        onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: sha
-      changes:
-        - addColumn:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columns:
-              - column: { name: sha, type: VARCHAR(64) }
-
-  - changeSet:
-      id: audit-005-ensure-col-branch
-      author: system
-      context: meta
-      preConditions:
-        onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: branch
-      changes:
-        - addColumn:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columns:
-              - column: { name: branch, type: VARCHAR(128) }
-
-  - changeSet:
-      id: audit-006-ensure-col-actor
-      author: system
-      context: meta
-      preConditions:
-        onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: actor
-      changes:
-        - addColumn:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columns:
-              - column: { name: actor, type: VARCHAR(64) }
-
-  - changeSet:
-      id: audit-007-ensure-col-kind
-      author: system
-      context: meta
-      preConditions:
-        onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: kind
-      changes:
-        - addColumn:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columns:
-              - column: { name: kind, type: VARCHAR(64) }
-
-  - changeSet:
-      id: audit-008-ensure-col-created-at
-      author: system
-      context: meta
-      preConditions:
-        onFail: MARK_RAN
-        not:
-          columnExists:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columnName: created_at
-      changes:
-        - addColumn:
-            schemaName: lb_meta
-            tableName: lb_audit
-            columns:
-              - column:
-                  name: created_at
-                  type: TIMESTAMP WITHOUT TIME ZONE
-                  defaultValueComputed: NOW()

@@ -1,23 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ================== CONFIG ==================
 LB_DIR="${LB_DIR:-liquibase}"
 WORKDIR="${GITHUB_WORKSPACE:-$PWD}"
 DEPLOYER="${GITHUB_ACTOR:-ci-runner}"
 
-# ENV LIST (DEV|TEST|PROD), pode ser múltiplo: "DEV,TEST" ou "ALL"
-ENV_LIST_RAW="${1:-}"; shift || true
-[[ -z "$ENV_LIST_RAW" ]] && { echo "Usage: $0 <ENV|ENV1,ENV2|ALL> [--contexts=...]"; exit 2; }
+# Liquibase 5.x
+LIQUIBASE_IMAGE="${LIQUIBASE_IMAGE:-liquibase/liquibase:5.0}"
+LIQUIBASE_PLUGINS_VOL="${LIQUIBASE_PLUGINS_VOL:-liquibase_plugins_cache}"
+LIQUIBASE_HOME_IN_CONTAINER="/liquibase"     # volume p/ cache de jars/plugins
+LIQUIBASE_EXTENSIONS="${LIQUIBASE_EXTENSIONS:-}"  # deixe vazio; será expandida apenas no container
 
-# Args extras p/ Liquibase (ex.: --contexts=reset,ddl)
+# JDBC que usaremos explicitamente (sem wildcard)
+PG_JDBC_VERSION="${PG_JDBC_VERSION:-42.7.4}"
+PG_JDBC_JAR="postgresql-${PG_JDBC_VERSION}.jar"
+PG_JDBC_PATH_IN_VOL="${LIQUIBASE_HOME_IN_CONTAINER}/lib/${PG_JDBC_JAR}"
+
+# ================== ARGs / INPUTS ==================
+# ENV LIST (DEV|TEST|PROD), pode ser múltiplo: "DEV,TEST" ou "ALL"
+ENV_LIST_RAW=""
+if [[ $# -gt 0 && "${1#-}" == "$1" ]]; then
+  ENV_LIST_RAW="$1"
+  shift
+fi
+
+# Args extras p/ Liquibase (ex.: --contexts=ddl,seed)
 EXTRA_ARGS=("$@")
 
-# apply | plan | tag
-MODE="${MODE:-apply}"          # default: apply
-TAG_NAME="${TAG_NAME:-}"       # usado quando MODE=tag
+# Fallbacks se não veio arg posicional
+if [[ -z "${ENV_LIST_RAW}" ]]; then
+  for _cand in \
+      "${ENV_ARG:-}" "${ENV:-}" \
+      "${INPUT_ENVS:-}" "${INPUT_ENV:-}" \
+      "${GITHUB_INPUT_ENVS:-}" "${GITHUB_INPUT_ENV:-}"; do
+    if [[ -n "$_cand" ]]; then ENV_LIST_RAW="$(_cmd="$_cand"; printf "%s" "$_cmd")"; break; fi
+  done
+fi
+if [[ -z "${ENV_LIST_RAW}" ]]; then
+  echo "Usage: $0 <ENV|ENV1,ENV2|ALL> [--contexts=...]"
+  echo "  Or set ENV_ARG / ENV / INPUT_ENV(S) environment variables."
+  exit 2
+fi
 
-# ------------------------------------------------------------
-# Util: máscara de dados e parsing de URL postgres externa
+# apply | plan | tag
+MODE="${MODE:-apply}"   # default: apply
+TAG_NAME="${TAG_NAME:-}"
+
+# ================== UTILS ==================
 mask() {
   sed -E 's#//([^:@/]+):[^@/]+@#//\1:****@#; s#(//)[^:/]+(:[0-9]+)?/[^?]+#\1***:****/***#; s/(password=)[^&]+/\1****/g' <<<"$1"
 }
@@ -53,7 +83,7 @@ parse_pg_url() {
     for kv in "${parts[@]}"; do
       [[ -z "$kv" ]] && continue
       case "$kv" in
-        user=*|password=*) ;;                 # remove cred params
+        user=*|password=*) ;;                  # remove cred params
         sslmode=*) have_ssl="1"; out_q="${out_q:+$out_q&}$kv" ;;
         *) out_q="${out_q:+$out_q&}$kv" ;;
       esac
@@ -74,7 +104,6 @@ tcp_probe() {
     && echo "[tcp] OK" || { echo "::error::[tcp] Cannot open TCP connection to ${DB_HOST}:${DB_PORT}"; exit 3; }
 }
 
-# Classifica o plano para auditoria/labels
 classify_plan() {
   local f="$1"
   local U; U="$(tr '[:lower:]' '[:upper:]' < "$f" 2>/dev/null || true)"
@@ -88,19 +117,76 @@ classify_plan() {
   fi
 }
 
-# Executa Liquibase
+# ================== LIQUIBASE (v5) ==================
 run_liquibase() {
   local PROPS="$1"; shift
   echo "+ liquibase $* (props=$PROPS)"
+
+  # 1) preparar plugins/jdbc no volume de cache (NÃO expandir variáveis do host aqui!)
+  docker run --rm --network host -w /workspace \
+    -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
+    -e "LIQUIBASE_EXTENSIONS=${LIQUIBASE_EXTENSIONS:-}" \
+    -e "PG_JDBC_JAR=${PG_JDBC_JAR}" \
+    -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
+    -v "$WORKDIR/$LB_DIR:/workspace" \
+    "$LIQUIBASE_IMAGE" \
+    sh -euc '
+      set -eu
+      echo "[lb] LIQUIBASE_HOME=${LIQUIBASE_HOME:-/liquibase}"
+      mkdir -p "${LIQUIBASE_HOME}/lib"
+
+      # Tente instalar extensões (Liquibase 5 ignora/sem comando -> tolerar)
+      for ext in ${LIQUIBASE_EXTENSIONS:-} postgresql liquibase-postgresql; do
+        [ -n "$ext" ] || continue
+        echo "[lb] install extension: $ext"
+        liquibase --no-prompt --log-level=warning install "$ext" || true
+      done
+
+      # Preferir JAR local do repo (liquibase/lib) se existir
+      if compgen -G "/workspace/lib/postgresql-*.jar" >/dev/null 2>&1; then
+        cp -f /workspace/lib/postgresql-*.jar "${LIQUIBASE_HOME}/lib/" || true
+      fi
+
+      # Garantir JDBC específico
+      JAR="${LIQUIBASE_HOME}/lib/${PG_JDBC_JAR}"
+      if [ ! -s "$JAR" ]; then
+        echo "[lb] fetching JDBC driver → $JAR"
+        URL="https://repo1.maven.org/maven2/org/postgresql/postgresql/${PG_JDBC_JAR#postgresql-}"
+        URL="https://repo1.maven.org/maven2/org/postgresql/postgresql/'"${PG_JDBC_VERSION}"'/postgresql-'"${PG_JDBC_VERSION}"'.jar"
+        if command -v curl >/dev/null 2>&1; then
+          curl -fsSL -o "$JAR" "$URL" || true
+        elif command -v wget >/dev/null 2>&1; then
+          wget -qO "$JAR" "$URL" || true
+        fi
+      fi
+
+      if [ ! -s "$JAR" ]; then
+        echo "::error::PostgreSQL JDBC não encontrado. Sem egress do runner?"
+        echo "        Commit um JAR em liquibase/lib/ OU habilite egress."
+        exit 9
+      fi
+
+      echo "[lb] extensions/lib ready."
+      ls -l "${LIQUIBASE_HOME}/lib" || true
+    '
+
+  # 2) executar comando com classpath EXPLÍCITO (sem wildcard)
   docker run --rm --network host -w /workspace \
     -e "JAVA_OPTS=-Dactor=${DEPLOYER} -Ddeployer=${DEPLOYER} -DdeployKind=${DEPLOY_KIND:-unknown} -DgitSha=${GITHUB_SHA:-unknown} -DgitRef=${GITHUB_REF_NAME:-unknown}" \
-    -v "$WORKDIR/$LB_DIR:/workspace" liquibase/liquibase \
-    --defaultsFile="/workspace/conf/$PROPS" \
-    --log-level=info \
-    --url="$JDBC_URL_NOAUTH" \
-    --username="$DB_USER" \
-    --password="$DB_PASS" \
-    "$@" "${EXTRA_ARGS[@]}"
+    -e "LIQUIBASE_HOME=${LIQUIBASE_HOME_IN_CONTAINER}" \
+    -e "LIQUIBASE_CLASSPATH=${PG_JDBC_PATH_IN_VOL}" \
+    -e "CLASSPATH=${PG_JDBC_PATH_IN_VOL}" \
+    -v "${LIQUIBASE_PLUGINS_VOL}:${LIQUIBASE_HOME_IN_CONTAINER}" \
+    -v "$WORKDIR/$LB_DIR:/workspace" \
+    "$LIQUIBASE_IMAGE" \
+    liquibase \
+      --defaultsFile="/workspace/conf/${PROPS}" \
+      --log-level=info \
+      --url="${JDBC_URL_NOAUTH}" \
+      --username="${DB_USER}" \
+      --password="${DB_PASS}" \
+      --classpath="${PG_JDBC_PATH_IN_VOL}" \
+      "$@" "${EXTRA_ARGS[@]}"
 }
 
 log_ctx() {
@@ -122,7 +208,6 @@ env_props() {
   esac
 }
 
-# Cria schemas necessários (antes do Liquibase tentar criar suas tabelas)
 ensure_schemas() {
   echo "[init] ensuring schemas exist…"
   docker run --rm --network host -e PGPASSWORD="$DB_PASS" postgres:15 \
@@ -133,7 +218,6 @@ ensure_schemas() {
     "
 }
 
-# Auditoria (env + evento)
 log_audit() {
   local ENV_NAME="$1"
   local EVENT="$2"
@@ -143,14 +227,15 @@ log_audit() {
 
   echo "[AUDIT] ${ENV_NAME} ${EVENT} (${KIND}) sha=${SHA} branch=${BRANCH} actor=${DEPLOYER}"
 
+  # 100% silencioso se a tabela ainda não existir
   docker run --rm --network host \
     -e PGPASSWORD="$DB_PASS" postgres:15 \
     psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" \
     -c "INSERT INTO lb_meta.lb_audit (event, env, sha, branch, actor, kind)
-        VALUES ('$EVENT', '$ENV_NAME', '$SHA', '$BRANCH', '$DEPLOYER', '$KIND');" || true
+        VALUES ('$EVENT', '$ENV_NAME', '$SHA', '$BRANCH', '$DEPLOYER', '$KIND');" \
+    >/dev/null 2>&1 || true
 }
 
-# Seleciona a URL do ambiente atual:
 pick_jdbc_for_env() {
   local E="$1"
   local var="JDBC_URL_${E}"
@@ -179,19 +264,6 @@ promote() {
 
   tcp_probe
   ensure_schemas
-
-  # Se for reset (apenas contexto reset)
-  if [[ " ${EXTRA_ARGS[*]} " == *"--contexts=reset"* ]]; then
-    echo "[RESET] Rodando apenas o contexto 'reset' em $ENV_NAME…"
-    local PLAN_FILE="plan_${ENV_NAME}.sql"
-    if [[ "$MODE" == "plan" ]]; then
-      run_liquibase "$PROPS" updateSQL > "$PLAN_FILE"
-      tail -n 80 "$PLAN_FILE" || true
-    else
-      run_liquibase "$PROPS" update
-    fi
-    return 0
-  fi
 
   echo "===== [$ENV_NAME] VALIDATE ====="
   run_liquibase "$PROPS" validate
@@ -244,23 +316,26 @@ tag_only() {
   run_liquibase "$PROPS" tag "$TAG_NAME"
 }
 
-# ------------------------------------------------------------
+# ================== MAIN ==================
 # Normaliza lista de ambientes
-if [[ "${ENV_LIST_RAW^^}" == "ALL" ]]; then
+ENV_INPUT_UP="$(echo "$ENV_LIST_RAW" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
+if [[ "$ENV_INPUT_UP" == "ALL" ]]; then
   ENV_LIST=("DEV" "TEST" "PROD")
 else
-  IFS=',' read -r -a ENV_LIST <<<"${ENV_LIST_RAW^^}"
+  IFS=',' read -r -a ENV_LIST <<<"$ENV_INPUT_UP"
 fi
 
-# Para cada ambiente
-for ENV in "${ENV_LIST[@]}"; do
-  case "$ENV" in
+# Valida ambientes
+for E in "${ENV_LIST[@]}"; do
+  case "$E" in
     DEV|TEST|PROD) ;;
-    *) echo "Invalid environment in list: $ENV"; exit 2 ;;
+    *) echo "Invalid environment in list: $E"; exit 2 ;;
   esac
+done
 
+# Executa por ambiente
+for ENV in "${ENV_LIST[@]}"; do
   pick_jdbc_for_env "$ENV"
-
   case "$MODE" in
     tag)   tag_only "$ENV" ;;
     plan|apply) promote "$ENV" ;;

@@ -1,0 +1,26 @@
+databaseChangeLog:
+  - changeSet:
+      id: 20250930-1100-feat-create_business_tables-idx-customer-email
+      author: ${deployer}
+      comment: "Criar índice único em app_core.customer.email"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            indexName: idx_customer_email
+            schemaName: app_core
+            tableName: customer
+      changes:
+        - createIndex:
+            schemaName: app_core
+            tableName: customer
+            indexName: idx_customer_email
+            unique: true
+            columns:
+              - column:
+                  name: email
+      rollback:
+        - dropIndex:
+            schemaName: app_core
+            tableName: customer
+            indexName: idx_customer_email

@@ -1,17 +1,15 @@
-# liquibase/changelogs/util/reset.yaml
 databaseChangeLog:
   - changeSet:
-      id: reset-001-drop-all
+      id: reset-001-drop-and-recreate-app-core
       author: ${deployer}
-      labels: "topic:reset,kind:ddl,ref:${gitRef},sha:${gitSha}"
       context: reset
-      comment: "Reset database: drop core tables if they exist"
+      comment: "DROP & CREATE schema app_core (uso controlado, apenas com --contexts=reset)"
       changes:
-        - sql:
-            splitStatements: false
-            sql: |
-              -- Dropar em ordem por causa das FKs
-              DROP TABLE IF EXISTS public.order_header CASCADE;
-              DROP TABLE IF EXISTS public.product      CASCADE;
-              DROP TABLE IF EXISTS public.person       CASCADE;
-              DROP TABLE IF EXISTS public.lb_audit     CASCADE;
+        - sql: |
+            DO $$
+            BEGIN
+              IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'app_core') THEN
+                EXECUTE 'DROP SCHEMA app_core CASCADE';
+              END IF;
+              EXECUTE 'CREATE SCHEMA app_core';
+            END$$;

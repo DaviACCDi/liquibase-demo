@@ -1,0 +1,28 @@
+databaseChangeLog:
+  - changeSet:
+      id: 20250930-1040-feat-create_business_tables-fk-sales-customer
+      author: ${deployer}
+      comment: "Adicionar FK sales.customer_id → customer.id"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          foreignKeyConstraintExists:
+            foreignKeyName: fk_sales_customer
+            schemaName: app_core
+            tableName: sales
+      changes:
+        - addForeignKeyConstraint:
+            baseTableSchemaName: app_core
+            baseTableName: sales
+            baseColumnNames: customer_id
+            referencedTableSchemaName: app_core
+            referencedTableName: customer
+            referencedColumnNames: id
+            constraintName: fk_sales_customer
+            onDelete: RESTRICT
+            onUpdate: RESTRICT
+      rollback:
+        - dropForeignKeyConstraint:
+            baseTableSchemaName: app_core
+            baseTableName: sales
+            constraintName: fk_sales_customer

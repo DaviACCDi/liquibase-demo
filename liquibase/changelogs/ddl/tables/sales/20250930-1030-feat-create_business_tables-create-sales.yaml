@@ -1,0 +1,56 @@
+databaseChangeLog:
+  - changeSet:
+      id: 20250930-1030-feat-create_business_tables-create-sales
+      author: ${deployer}
+      comment: "Criar tabela app_core.sales"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            schemaName: app_core
+            tableName: sales
+      changes:
+        - createTable:
+            schemaName: app_core
+            tableName: sales
+            remarks: "Vendas"
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: customer_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: product_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: quantity
+                  type: INTEGER
+                  defaultValueNumeric: 1
+                  constraints:
+                    nullable: false
+              - column:
+                  name: unit_price
+                  type: NUMERIC(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total
+                  type: NUMERIC(12,2)
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITHOUT TIME ZONE
+                  defaultValueComputed: NOW()
+      rollback:
+        - dropTable:
+            schemaName: app_core
+            tableName: sales
